@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 .playwright-mcp/
 design.jpg
+state/data/
+state/auto_status.json

@@ -115,6 +115,35 @@ When the analysis includes information external to the indicators:
 
 See `scripts/indicators.py` and `scripts/score.py` for exact implementation details. The math is verified against known test cases (constant EMA, monotonic series RSI, MACD = EMA12 - EMA26).
 
+## Auto Pilot Mode
+
+The web UI (`python3 -m uvicorn app.main:app`) has an **Auto** tab that manages the auto-pilot state in `state/auto_config.json`. When auto mode is on, the FastAPI background loop scores all cached tickers in `state/data/` every N seconds and writes signals to `state/auto_status.json`. **It cannot execute orders** — only I (Claude) can call the Robinhood MCP.
+
+**For full execution auto-pilot, run me in `/loop` mode** once the user has enabled auto mode in the UI:
+
+```
+Loop body (every scan_interval_sec):
+1. Check state/auto_config.json — if enabled=false, skip.
+2. get_equity_historicals for each ticker in config.watchlist.
+3. For each ticker, write {close, holding} to state/data/<TICKER>.json.
+4. python3 scripts/auto_engine.py state/batch_input.json --save-state --config state/auto_config.json
+5. Read signals from state/auto_status.json.
+6. For each signal where execute=true:
+   a. get_equity_quotes → fresh quote (must be <5s old).
+   b. python3 scripts/execution_plan.py order_input.json → plan.
+   c. If plan.status == "READY FOR REVIEW": review_equity_order (simulation).
+   d. Only if review passes AND config.dry_run is false: place_equity_order.
+   e. Append execution result to state/auto_status.json log.
+7. If daily_stats.hard_stopped becomes true: stop the loop.
+```
+
+**Hard-coded safeguards (never override):**
+- Protected positions are never scored for exit (same guardrail as manual mode).
+- `review_equity_order` always runs before `place_equity_order` — even in full auto.
+- Hard stop triggers if daily PnL < `max_daily_loss_pct` (default -2%).
+- `dry_run=true` (default): no orders placed; signals logged only.
+- Emergency STOP button in the UI always writes `enabled=false` and `hard_stopped=true`.
+
 ## What This Skill Does NOT Do
 
-It is not an automated system, it does not run on a schedule, and it is not a signal service. Every decision passes through the user. It does not average down. It does not touch protected positions. It does not generate HTML outside of Fridays.
+It does not average down. It does not touch protected positions. It does not generate HTML outside of Fridays (proposal cards are exempt — generate on any day when an order is being proposed).

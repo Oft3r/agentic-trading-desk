@@ -480,6 +480,209 @@
     .toast-error   { background: rgba(255,68,68,.15); color: var(--red);  border: 1px solid rgba(255,68,68,.3); }
     .toast-info    { background: var(--card); color: var(--text); border: 1px solid var(--border2); }
 
+    /* ══ AUTO MODE ══════════════════════════════════ */
+    /* Topbar auto indicator */
+    .auto-indicator {
+      display: none; align-items: center; gap: 7px;
+      font-size: 11px; font-weight: 700; letter-spacing: .1em;
+    }
+    .auto-indicator.visible { display: flex; }
+    .auto-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 6px var(--green);
+      animation: pulse-dot 1.4s ease-in-out infinite;
+    }
+    .auto-dot.stopped { background: var(--red); box-shadow: 0 0 6px var(--red); animation: none; }
+    @keyframes pulse-dot {
+      0%,100% { opacity: 1; transform: scale(1); }
+      50%      { opacity: 0.4; transform: scale(0.7); }
+    }
+    .auto-label { color: var(--green); }
+    .auto-label.stopped { color: var(--red); }
+    .stop-btn {
+      background: var(--red); color: #fff; border: none; cursor: pointer;
+      font-family: var(--font); font-size: 10px; font-weight: 900; letter-spacing: .1em;
+      padding: 4px 10px; border-radius: 3px;
+      animation: stop-flash 1.4s ease-in-out infinite;
+      transition: background .15s;
+    }
+    .stop-btn:hover { background: #cc0000; animation: none; }
+    @keyframes stop-flash {
+      0%,100% { box-shadow: 0 0 0 0 rgba(255,68,68,0); }
+      50%      { box-shadow: 0 0 0 4px rgba(255,68,68,.3); }
+    }
+
+    /* Auto tab layout */
+    #tab-auto { flex-direction: row; gap: 0; }
+    .auto-left {
+      width: 320px; flex-shrink: 0;
+      border-right: 1px solid var(--border2);
+      display: flex; flex-direction: column;
+      background: var(--panel); overflow-y: auto;
+    }
+    .auto-right {
+      flex: 1; display: flex; flex-direction: column;
+      overflow: hidden; background: var(--bg);
+    }
+
+    /* Master toggle */
+    .auto-master {
+      padding: 20px 18px 14px;
+      background: #0d0d0d;
+      border-bottom: 1px solid var(--border2);
+    }
+    .toggle-row {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .toggle-title { font-size: 13px; font-weight: 700; letter-spacing: .06em; }
+    .toggle-switch {
+      position: relative; width: 52px; height: 27px;
+    }
+    .toggle-switch input { opacity: 0; width: 0; height: 0; }
+    .toggle-track {
+      position: absolute; inset: 0; background: var(--border2);
+      border-radius: 27px; cursor: pointer; transition: background .2s;
+    }
+    .toggle-track::after {
+      content: ''; position: absolute;
+      left: 3px; top: 3px; width: 21px; height: 21px;
+      border-radius: 50%; background: var(--dim);
+      transition: transform .2s, background .2s;
+    }
+    .toggle-switch input:checked + .toggle-track { background: rgba(0,255,65,.25); }
+    .toggle-switch input:checked + .toggle-track::after {
+      transform: translateX(25px); background: var(--green);
+      box-shadow: 0 0 8px rgba(0,255,65,.6);
+    }
+    .toggle-sub { font-size: 11px; color: var(--dim); }
+    .dry-run-badge {
+      display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .06em;
+      padding: 2px 6px; border-radius: 2px;
+      background: rgba(240,165,0,.12); color: var(--amber); border: 1px solid rgba(240,165,0,.3);
+    }
+    .live-badge {
+      display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .06em;
+      padding: 2px 6px; border-radius: 2px;
+      background: rgba(255,68,68,.12); color: var(--red); border: 1px solid rgba(255,68,68,.3);
+    }
+
+    /* Watchlist editor */
+    .watchlist-chips {
+      display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px;
+    }
+    .chip {
+      display: flex; align-items: center; gap: 4px;
+      background: var(--card); border: 1px solid var(--border2);
+      border-radius: 3px; padding: 3px 7px; font-size: 11px; font-weight: 700;
+    }
+    .chip-remove {
+      background: none; border: none; color: var(--dim); cursor: pointer;
+      font-size: 12px; padding: 0; line-height: 1;
+    }
+    .chip-remove:hover { color: var(--red); }
+    .watchlist-add-row {
+      display: flex; gap: 6px;
+    }
+    .watchlist-input {
+      flex: 1; background: var(--card); border: 1px solid var(--border2);
+      color: var(--text); font-family: var(--font); font-size: 12px;
+      padding: 5px 8px; border-radius: 3px; text-transform: uppercase;
+    }
+    .watchlist-input:focus { outline: none; border-color: var(--green2); }
+    .add-btn {
+      background: var(--card); border: 1px solid var(--border2);
+      color: var(--green); cursor: pointer; font-family: var(--font);
+      font-size: 13px; font-weight: 700; padding: 5px 10px; border-radius: 3px;
+      transition: background .15s;
+    }
+    .add-btn:hover { background: rgba(0,255,65,.08); }
+
+    /* Limits form */
+    .limits-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+    }
+
+    /* Status panel (right side of auto tab) */
+    .auto-status-bar {
+      padding: 10px 16px; background: var(--panel);
+      border-bottom: 1px solid var(--border2);
+      display: flex; align-items: center; gap: 16px; flex-shrink: 0;
+    }
+    .status-kv { display: flex; flex-direction: column; gap: 1px; }
+    .status-kv .sk { font-size: 10px; letter-spacing: .08em; color: var(--dim); }
+    .status-kv .sv { font-size: 13px; font-weight: 700; }
+    .auto-body { flex: 1; display: flex; overflow: hidden; }
+    .signals-pane {
+      flex: 1; overflow-y: auto; padding: 12px 14px;
+      border-right: 1px solid var(--border2);
+    }
+    .log-pane {
+      width: 260px; overflow-y: auto; padding: 10px 12px;
+      font-size: 11px; flex-shrink: 0;
+    }
+    .pane-sub-title {
+      font-size: 10px; letter-spacing: .1em; color: var(--dim);
+      margin-bottom: 8px;
+    }
+
+    /* Signal card */
+    .signal-card {
+      background: var(--card); border: 1px solid var(--border2);
+      border-radius: 5px; padding: 10px 12px; margin-bottom: 8px;
+      display: flex; align-items: flex-start; gap: 10px;
+      transition: border-color .15s;
+    }
+    .signal-card.decisive { border-left: 3px solid var(--amber); }
+    .signal-card.execute  { border-left: 3px solid var(--green); }
+    .signal-card.blocked  { border-left: 3px solid var(--dim2); opacity: .6; }
+    .signal-sym {
+      font-size: 15px; font-weight: 900; letter-spacing: .06em;
+      min-width: 52px;
+    }
+    .signal-body { flex: 1; }
+    .signal-action { font-size: 12px; font-weight: 700; margin-bottom: 3px; }
+    .signal-meta { font-size: 11px; color: var(--dim); }
+    .signal-badge {
+      font-size: 10px; font-weight: 700; padding: 3px 7px; border-radius: 3px;
+      letter-spacing: .06em; white-space: nowrap; align-self: flex-start;
+    }
+    .sb-dry    { background: rgba(240,165,0,.12); color: var(--amber); border: 1px solid rgba(240,165,0,.3); }
+    .sb-exec   { background: rgba(0,255,65,.12);  color: var(--green);  border: 1px solid rgba(0,255,65,.3); }
+    .sb-block  { background: rgba(80,80,80,.12);  color: var(--dim);    border: 1px solid var(--border2); }
+    .sb-hold   { background: rgba(77,166,255,.1); color: var(--blue);   border: 1px solid rgba(77,166,255,.25); }
+    .sb-wait   { background: rgba(240,165,0,.08); color: #aaa;          border: 1px solid var(--border2); }
+
+    /* Log entries */
+    .log-entry { padding: 4px 0; border-bottom: 1px solid #161616; }
+    .log-entry .le-ts { color: var(--dim); font-size: 10px; }
+    .log-entry .le-event { font-weight: 700; }
+    .le-AUTO_STARTED { color: var(--green); }
+    .le-AUTO_STOPPED { color: var(--dim); }
+    .le-EMERGENCY_STOP { color: var(--red); }
+    .le-HARD_STOP { color: var(--red); }
+    .le-RESET { color: var(--amber); }
+    .le-LOOP_ERROR { color: var(--red); }
+
+    /* Hard-stopped banner */
+    .hard-stop-banner {
+      background: rgba(255,68,68,.1); border: 1px solid rgba(255,68,68,.3);
+      border-radius: 4px; padding: 8px 12px; margin-bottom: 10px;
+      font-size: 12px; font-weight: 700; color: var(--red);
+    }
+
+    /* Claude loop instructions */
+    .claude-loop-box {
+      background: #0e0e12; border: 1px solid #2a2a40;
+      border-radius: 4px; padding: 12px 14px; margin-top: 10px; font-size: 11px;
+      color: var(--dim); line-height: 1.7;
+    }
+    .claude-loop-box code {
+      background: var(--card); border: 1px solid var(--border2);
+      border-radius: 2px; padding: 1px 5px; color: var(--green); font-size: 11px;
+    }
+
     /* ── Shared utilities ─────────────────────────── */
     .dim-text { color: var(--dim); }
     ::-webkit-scrollbar { width: 5px; height: 5px; }
@@ -496,6 +699,7 @@
     <span class="logo">QUANTUM_OS</span>
     <div class="nav-tabs">
       <button class="tab-btn" data-tab="portfolio">Portfolio</button>
+      <button class="tab-btn" data-tab="auto" id="auto-tab-btn">Auto</button>
       <button class="tab-btn" data-tab="orderflow">OrderFlow</button>
       <button class="tab-btn" data-tab="riskengine">RiskEngine</button>
       <button class="tab-btn" data-tab="backtest">Backtest</button>
@@ -503,6 +707,12 @@
     </div>
   </div>
   <div class="topbar-right">
+    <!-- Auto mode live indicator — shown only when enabled -->
+    <div id="auto-indicator" class="auto-indicator">
+      <div id="auto-dot" class="auto-dot"></div>
+      <span id="auto-label" class="auto-label">AUTO</span>
+      <button id="emergency-stop-btn" class="stop-btn" title="Emergency stop">■ STOP</button>
+    </div>
     <div class="market-strip">
       <span class="mkt-item up">↑ SPX —</span>
       <span class="mkt-item down">↓ VIX —</span>
@@ -622,6 +832,175 @@
     </div><!-- /analyst-pane -->
 
   </div><!-- /tab-portfolio -->
+
+  <!-- ═══ AUTO MODE TAB ════════════════════════════════════ -->
+  <div id="tab-auto" class="tab-panel">
+
+    <!-- Config (left) -->
+    <div class="auto-left">
+
+      <!-- Master toggle -->
+      <div class="auto-master">
+        <div class="toggle-row">
+          <span class="toggle-title">AUTO PILOT</span>
+          <label class="toggle-switch" title="Enable/disable auto mode">
+            <input type="checkbox" id="auto-master-toggle">
+            <div class="toggle-track"></div>
+          </label>
+        </div>
+        <div class="toggle-sub">
+          Mode: <span id="auto-mode-badge" class="dry-run-badge">DRY RUN</span>
+          &nbsp; Interval: <span id="auto-interval-label">5min</span>
+        </div>
+      </div>
+
+      <!-- Watchlist -->
+      <div class="form-section">
+        <div class="form-title">WATCHLIST</div>
+        <div id="watchlist-chips" class="watchlist-chips"></div>
+        <div class="watchlist-add-row">
+          <input id="watchlist-input" class="watchlist-input" type="text"
+                 placeholder="AAPL" maxlength="10" spellcheck="false">
+          <button id="watchlist-add-btn" class="add-btn">+</button>
+        </div>
+      </div>
+
+      <!-- Risk limits -->
+      <div class="form-section">
+        <div class="form-title">RISK LIMITS</div>
+        <div class="limits-grid">
+          <div class="form-row">
+            <label class="form-label">Max position %</label>
+            <input id="lim-max-pos" class="form-input" type="number"
+                   step="1" min="1" max="50" value="10">
+          </div>
+          <div class="form-row">
+            <label class="form-label">Min score (entry)</label>
+            <input id="lim-min-score" class="form-input" type="number"
+                   step="1" min="1" max="6" value="3">
+          </div>
+          <div class="form-row">
+            <label class="form-label">Max trades/day</label>
+            <input id="lim-max-trades" class="form-input" type="number"
+                   step="1" min="1" max="20" value="5">
+          </div>
+          <div class="form-row">
+            <label class="form-label">Cooldown (bars)</label>
+            <input id="lim-cooldown" class="form-input" type="number"
+                   step="1" min="0" max="30" value="5">
+          </div>
+          <div class="form-row">
+            <label class="form-label">Daily loss limit %</label>
+            <input id="lim-max-loss" class="form-input" type="number"
+                   step="0.5" min="-20" max="0" value="-2">
+          </div>
+          <div class="form-row">
+            <label class="form-label">Scan interval (s)</label>
+            <input id="lim-interval" class="form-input" type="number"
+                   step="30" min="30" max="3600" value="300">
+          </div>
+        </div>
+      </div>
+
+      <!-- Execution mode -->
+      <div class="form-section">
+        <div class="form-title">EXECUTION MODE</div>
+        <div class="form-checkbox-row">
+          <input id="auto-dry-run" type="checkbox" checked>
+          <label style="font-size:12px">Dry run (signals only, no orders)</label>
+        </div>
+        <div style="font-size:11px;color:var(--dim);margin-top:4px;line-height:1.6">
+          Live mode requires Claude Code running<br>
+          in <code style="color:var(--green);background:var(--card);padding:1px 4px;border-radius:2px">/loop</code>
+          with Robinhood MCP access.
+        </div>
+        <button id="auto-save-config-btn" class="run-btn" style="margin-top:10px">SAVE CONFIG</button>
+      </div>
+
+      <!-- Reset / manual scan -->
+      <div class="form-section">
+        <div class="form-title">CONTROLS</div>
+        <div style="display:flex;gap:8px">
+          <button id="auto-scan-now-btn" class="run-btn" style="flex:1;background:var(--card);color:var(--amber);border:1px solid rgba(240,165,0,.3)">
+            ▶ SCAN NOW
+          </button>
+          <button id="auto-reset-btn" class="run-btn" style="flex:1;background:var(--card);color:var(--dim);border:1px solid var(--border2)">
+            RESET
+          </button>
+        </div>
+      </div>
+
+      <!-- Claude loop instructions -->
+      <div class="form-section">
+        <div class="form-title">FULL AUTO (Claude Loop)</div>
+        <div class="claude-loop-box">
+          For real trade execution, start Claude Code in
+          loop mode with:<br><br>
+          <code>/loop</code> every 5min: fetch Robinhood
+          data → run <code>auto_engine.py</code> → execute
+          decisive signals via <code>review_equity_order</code>
+          + <code>place_equity_order</code>.<br><br>
+          The UI reflects state written by the loop in
+          real time (5s refresh).
+        </div>
+      </div>
+
+    </div><!-- /auto-left -->
+
+    <!-- Status + signals (right) -->
+    <div class="auto-right">
+
+      <!-- Status bar -->
+      <div class="auto-status-bar">
+        <div class="status-kv">
+          <span class="sk">STATUS</span>
+          <span class="sv" id="auto-status-text" style="color:var(--dim)">IDLE</span>
+        </div>
+        <div class="status-kv">
+          <span class="sk">LAST SCAN</span>
+          <span class="sv" id="auto-last-scan" style="color:var(--dim)">—</span>
+        </div>
+        <div class="status-kv">
+          <span class="sk">NEXT SCAN</span>
+          <span class="sv" id="auto-next-scan" style="color:var(--dim)">—</span>
+        </div>
+        <div class="status-kv">
+          <span class="sk">TRADES TODAY</span>
+          <span class="sv" id="auto-trades-today">0</span>
+        </div>
+        <div class="status-kv">
+          <span class="sk">CACHED TICKERS</span>
+          <span class="sv" id="auto-cached-tickers" style="color:var(--dim)">0</span>
+        </div>
+      </div>
+
+      <!-- Signals + log -->
+      <div class="auto-body">
+
+        <div class="signals-pane">
+          <div class="pane-sub-title">SIGNALS (latest scan)</div>
+          <div id="auto-hard-stop-banner" class="hard-stop-banner" style="display:none">
+            ⛔ HARD STOPPED — daily loss limit hit. Click RESET to re-enable.
+          </div>
+          <div id="auto-signals-feed">
+            <div class="dim-text" style="font-size:12px;padding:8px 0">
+              No signals yet. Scan tickers via Portfolio tab, then run SCAN NOW.
+            </div>
+          </div>
+        </div>
+
+        <div class="log-pane">
+          <div class="pane-sub-title">EVENT LOG</div>
+          <div id="auto-log-feed">
+            <div class="dim-text" style="font-size:11px">No events yet.</div>
+          </div>
+        </div>
+
+      </div><!-- /auto-body -->
+
+    </div><!-- /auto-right -->
+
+  </div><!-- /tab-auto -->
 
   <!-- ═══ ORDERFLOW TAB (stub) ══════════════════════════════ -->
   <div id="tab-orderflow" class="tab-panel">

@@ -1,0 +1,19 @@
+{
+  "enabled": true,
+  "dry_run": true,
+  "watchlist": [
+    "NVDA",
+    "AAPL",
+    "TSLA",
+    "MSFT"
+  ],
+  "scan_interval_sec": 300,
+  "macro_score": 0,
+  "max_position_pct": 0.1,
+  "min_score_entry": 3,
+  "max_daily_trades": 5,
+  "cooldown_bars": 5,
+  "max_daily_loss_pct": -2,
+  "portfolio_value": 0,
+  "cash_available": 0
+}

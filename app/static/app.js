@@ -775,5 +775,350 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.target === e.currentTarget) closeModal();
   });
 
+  // Auto mode
+  initAutoMode();
+
   switchTab('portfolio');
 });
+
+// ═══════════════════════════════════════════════════════════════
+// AUTO MODE
+// ═══════════════════════════════════════════════════════════════
+
+const autoState = {
+  enabled: false,
+  pollTimer: null,
+};
+
+// ── Init & event wiring ─────────────────────────────────────
+
+function initAutoMode() {
+  // Load config into form
+  fetch('/api/auto/config').then(r => r.json()).then(applyConfigToForm);
+
+  // Toggle
+  document.getElementById('auto-master-toggle').addEventListener('change', async e => {
+    const on = e.target.checked;
+    const r  = await post('/api/auto/toggle', { enabled: on });
+    if (r.ok) {
+      autoState.enabled = on;
+      updateTopbarIndicator(on);
+      showToast(on ? 'Auto mode ENABLED' : 'Auto mode disabled',
+                on ? 'success' : 'info');
+      if (on) startAutoPoll(); else stopAutoPoll();
+    }
+  });
+
+  // Dry-run toggle
+  document.getElementById('auto-dry-run').addEventListener('change', saveAutoConfig);
+
+  // Save config
+  document.getElementById('auto-save-config-btn').addEventListener('click', saveAutoConfig);
+
+  // Scan now
+  document.getElementById('auto-scan-now-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('auto-scan-now-btn');
+    btn.textContent = 'SCANNING...'; btn.disabled = true;
+    const r = await post('/api/auto/scan', {});
+    btn.textContent = '▶ SCAN NOW'; btn.disabled = false;
+    if (r.error) { showToast(r.error, 'error'); return; }
+    renderAutoStatus(r.status || await fetch('/api/auto/status').then(x => x.json()));
+    showToast('Scan complete', 'success');
+  });
+
+  // Reset
+  document.getElementById('auto-reset-btn').addEventListener('click', async () => {
+    await post('/api/auto/reset', {});
+    const s = await fetch('/api/auto/status').then(r => r.json());
+    renderAutoStatus(s);
+    showToast('Auto state reset', 'info');
+  });
+
+  // Emergency stop (topbar)
+  document.getElementById('emergency-stop-btn').addEventListener('click', async () => {
+    await post('/api/auto/stop', {});
+    autoState.enabled = false;
+    document.getElementById('auto-master-toggle').checked = false;
+    updateTopbarIndicator(false);
+    stopAutoPoll();
+    const s = await fetch('/api/auto/status').then(r => r.json());
+    renderAutoStatus(s);
+    showToast('⛔ Auto mode EMERGENCY STOPPED', 'error');
+  });
+
+  // Watchlist add
+  document.getElementById('watchlist-add-btn').addEventListener('click', addWatchlistTicker);
+  document.getElementById('watchlist-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') addWatchlistTicker();
+  });
+
+  // Start poll if already enabled
+  fetch('/api/auto/status').then(r => r.json()).then(s => {
+    renderAutoStatus(s);
+    if (s.enabled) {
+      autoState.enabled = true;
+      document.getElementById('auto-master-toggle').checked = true;
+      updateTopbarIndicator(true);
+      startAutoPoll();
+    }
+  });
+}
+
+// ── Config helpers ──────────────────────────────────────────
+
+function applyConfigToForm(cfg) {
+  if (!cfg) return;
+  const set = (id, val) => { const el = document.getElementById(id); if (el && val != null) el.value = val; };
+  set('lim-max-pos',    Math.round((cfg.max_position_pct || 0.1) * 100));
+  set('lim-min-score',  cfg.min_score_entry  ?? 3);
+  set('lim-max-trades', cfg.max_daily_trades ?? 5);
+  set('lim-cooldown',   cfg.cooldown_bars    ?? 5);
+  set('lim-max-loss',   cfg.max_daily_loss_pct ?? -2);
+  set('lim-interval',   cfg.scan_interval_sec  ?? 300);
+
+  const dryEl = document.getElementById('auto-dry-run');
+  if (dryEl) dryEl.checked = cfg.dry_run !== false;
+
+  const badge = document.getElementById('auto-mode-badge');
+  if (badge) {
+    badge.textContent  = cfg.dry_run !== false ? 'DRY RUN' : 'LIVE';
+    badge.className    = cfg.dry_run !== false ? 'dry-run-badge' : 'live-badge';
+  }
+  const ivLabel = document.getElementById('auto-interval-label');
+  if (ivLabel) {
+    const sec = cfg.scan_interval_sec || 300;
+    ivLabel.textContent = sec >= 60 ? `${Math.round(sec/60)}min` : `${sec}s`;
+  }
+  renderWatchlistChips(cfg.watchlist || []);
+  if (cfg.enabled) {
+    autoState.enabled = true;
+    document.getElementById('auto-master-toggle').checked = true;
+    updateTopbarIndicator(true);
+  }
+}
+
+async function saveAutoConfig() {
+  const cfg = {
+    max_position_pct:  parseInt(document.getElementById('lim-max-pos').value)     / 100,
+    min_score_entry:   parseInt(document.getElementById('lim-min-score').value),
+    max_daily_trades:  parseInt(document.getElementById('lim-max-trades').value),
+    cooldown_bars:     parseInt(document.getElementById('lim-cooldown').value),
+    max_daily_loss_pct: parseFloat(document.getElementById('lim-max-loss').value),
+    scan_interval_sec: parseInt(document.getElementById('lim-interval').value),
+    dry_run:           document.getElementById('auto-dry-run').checked,
+    watchlist:         getCurrentWatchlist(),
+  };
+  const r = await post('/api/auto/config', cfg);
+  if (r.ok) {
+    applyConfigToForm(r.config);
+    showToast('Config saved', 'success');
+  }
+}
+
+// ── Watchlist chips ─────────────────────────────────────────
+
+function getCurrentWatchlist() {
+  return Array.from(document.querySelectorAll('.chip[data-sym]'))
+              .map(c => c.dataset.sym);
+}
+
+function renderWatchlistChips(list) {
+  const el = document.getElementById('watchlist-chips');
+  el.textContent = '';
+  (list || []).forEach(sym => el.appendChild(makeChip(sym)));
+}
+
+function makeChip(sym) {
+  const chip = makeEl('div', 'chip');
+  chip.dataset.sym = sym;
+  chip.appendChild(makeEl('span', null, sym));
+  const btn = makeEl('button', 'chip-remove', '×');
+  btn.title = `Remove ${sym}`;
+  btn.addEventListener('click', () => { chip.remove(); saveAutoConfig(); });
+  chip.appendChild(btn);
+  return chip;
+}
+
+function addWatchlistTicker() {
+  const inp = document.getElementById('watchlist-input');
+  const sym = inp.value.trim().toUpperCase();
+  if (!sym || sym.length > 10) return;
+  const existing = getCurrentWatchlist();
+  if (existing.includes(sym)) { showToast(`${sym} already in watchlist`, 'info'); return; }
+  document.getElementById('watchlist-chips').appendChild(makeChip(sym));
+  inp.value = '';
+  saveAutoConfig();
+}
+
+// ── Topbar indicator ─────────────────────────────────────────
+
+function updateTopbarIndicator(on) {
+  const ind   = document.getElementById('auto-indicator');
+  const dot   = document.getElementById('auto-dot');
+  const label = document.getElementById('auto-label');
+  const tabBtn = document.getElementById('auto-tab-btn');
+
+  if (on) {
+    ind.classList.add('visible');
+    dot.classList.remove('stopped');
+    label.classList.remove('stopped');
+    label.textContent = 'AUTO';
+    if (tabBtn) { tabBtn.style.color = 'var(--green)'; }
+  } else {
+    ind.classList.remove('visible');
+    if (tabBtn) { tabBtn.style.color = ''; }
+  }
+}
+
+function setTopbarHardStopped() {
+  const dot   = document.getElementById('auto-dot');
+  const label = document.getElementById('auto-label');
+  const ind   = document.getElementById('auto-indicator');
+  ind.classList.add('visible');
+  dot.classList.add('stopped');
+  label.classList.add('stopped');
+  label.textContent = 'STOPPED';
+}
+
+// ── Status rendering ─────────────────────────────────────────
+
+function renderAutoStatus(s) {
+  if (!s) return;
+
+  // Status bar
+  const daily  = s.daily_stats || {};
+  const hardStop = daily.hard_stopped;
+
+  const statusEl = document.getElementById('auto-status-text');
+  if (statusEl) {
+    if (hardStop) {
+      statusEl.textContent = 'HARD STOPPED';
+      statusEl.style.color = 'var(--red)';
+      setTopbarHardStopped();
+    } else if (s.enabled) {
+      statusEl.textContent = s.dry_run !== false ? 'RUNNING (DRY)' : 'RUNNING (LIVE)';
+      statusEl.style.color = 'var(--green)';
+    } else {
+      statusEl.textContent = 'IDLE';
+      statusEl.style.color = 'var(--dim)';
+    }
+  }
+
+  setText(document.getElementById('auto-last-scan'),
+    s.last_scan ? s.last_scan.replace('T',' ').slice(0,19) : '—');
+  setText(document.getElementById('auto-next-scan'),
+    s.next_scan ? s.next_scan.replace('T',' ').slice(0,19) : '—');
+  setText(document.getElementById('auto-trades-today'),
+    String(daily.trades || 0));
+  setText(document.getElementById('auto-cached-tickers'),
+    String((s.cached_tickers || []).length));
+
+  // Hard-stop banner
+  const banner = document.getElementById('auto-hard-stop-banner');
+  if (banner) banner.style.display = hardStop ? 'block' : 'none';
+
+  // Signals
+  renderSignalsFeed(s.signals || [], s.blocked || []);
+
+  // Log
+  renderLogFeed(s.log || []);
+}
+
+function renderSignalsFeed(signals, blocked) {
+  const el = document.getElementById('auto-signals-feed');
+  el.textContent = '';
+
+  if (!signals.length && !blocked.length) {
+    el.appendChild(makeEl('div', 'dim-text',
+      'No signals. Add tickers to watchlist, scan via Portfolio tab, then run SCAN NOW.'));
+    return;
+  }
+
+  [...signals, ...blocked].forEach(s => {
+    const card = makeEl('div', 'signal-card');
+    if (s.execute)           card.classList.add('execute');
+    else if (s.blocked)      card.classList.add('blocked');
+    else if (s.decisive)     card.classList.add('decisive');
+
+    // Symbol
+    const symEl = makeEl('div', 'signal-sym', s.symbol || '?');
+    symEl.style.color = s.execute ? 'var(--green)' : s.blocked ? 'var(--dim)' : 'var(--text)';
+
+    // Body
+    const body    = makeEl('div', 'signal-body');
+    const actEl   = makeEl('div', 'signal-action', s.action || '?');
+    actEl.style.color = signalActionColor(s.action || '');
+    const score   = s.pillar_total ?? '?';
+    const scoreStr = score != null ? (score > 0 ? '+' : '') + score : '?';
+    const metaParts = [`score ${scoreStr}`];
+    if (s.close)             metaParts.push(`$${Number(s.close).toFixed(2)}`);
+    if (s.stop)              metaParts.push(`stop $${Number(s.stop).toFixed(2)}`);
+    if (s.size_fraction)     metaParts.push(`size ${Math.round(s.size_fraction * 100)}%`);
+    const metaEl  = makeEl('div', 'signal-meta', metaParts.join('  ·  '));
+    if (s.block_reason) {
+      const blkEl = makeEl('div', 'signal-meta', `⊘ ${s.block_reason}`);
+      blkEl.style.color = 'var(--dim)';
+      body.append(actEl, metaEl, blkEl);
+    } else {
+      body.append(actEl, metaEl);
+    }
+
+    // Badge
+    let badgeText, badgeCls;
+    if (s.execute)        { badgeText = 'EXECUTE'; badgeCls = 'signal-badge sb-exec'; }
+    else if (s.blocked)   { badgeText = 'BLOCKED'; badgeCls = 'signal-badge sb-block'; }
+    else if (s.decisive)  { badgeText = 'DRY';     badgeCls = 'signal-badge sb-dry'; }
+    else if (s.action?.startsWith('HOLD')) { badgeText = 'HOLD'; badgeCls = 'signal-badge sb-hold'; }
+    else                  { badgeText = 'WATCH';   badgeCls = 'signal-badge sb-wait'; }
+    const badge = makeEl('div', badgeCls, badgeText);
+
+    card.append(symEl, body, badge);
+    el.appendChild(card);
+  });
+}
+
+function signalActionColor(action) {
+  if (!action) return 'var(--dim)';
+  if (action.includes('EXIT')) return 'var(--red)';
+  if (action.includes('RE-ENTRY') || action.includes('TACTICAL')) return 'var(--green)';
+  if (action.startsWith('HOLD')) return 'var(--blue)';
+  return 'var(--dim)';
+}
+
+function renderLogFeed(log) {
+  const el = document.getElementById('auto-log-feed');
+  el.textContent = '';
+  if (!log.length) {
+    el.appendChild(makeEl('div', 'dim-text', 'No events yet.'));
+    return;
+  }
+  // Newest first, max 30
+  [...log].reverse().slice(0, 30).forEach(entry => {
+    const div  = makeEl('div', 'log-entry');
+    div.appendChild(makeEl('div', 'le-ts', (entry.ts || '').replace('T', ' ').slice(0, 19)));
+    const ev   = makeEl('span', `le-event le-${entry.event}`, entry.event || '');
+    div.appendChild(ev);
+    if (entry.detail) {
+      const det = makeEl('div', 'dim-text', entry.detail);
+      div.appendChild(det);
+    }
+    el.appendChild(div);
+  });
+}
+
+// ── Polling ─────────────────────────────────────────────────
+
+function startAutoPoll() {
+  stopAutoPoll();
+  autoState.pollTimer = setInterval(async () => {
+    const s = await fetch('/api/auto/status').then(r => r.json()).catch(() => null);
+    if (s) renderAutoStatus(s);
+  }, 5000);
+}
+
+function stopAutoPoll() {
+  if (autoState.pollTimer) {
+    clearInterval(autoState.pollTimer);
+    autoState.pollTimer = null;
+  }
+}
