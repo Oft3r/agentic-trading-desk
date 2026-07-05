@@ -19,6 +19,11 @@ import sys
 from statistics import pstdev
 from typing import Optional
 
+try:
+    import volatility as V
+except ImportError:
+    V = None
+
 
 # --------------------------------------------------------------------------
 # Primitives
@@ -158,10 +163,14 @@ def _slope(series: list[Optional[float]], lookback: int) -> Optional[float]:
     return series[last_i] - series[prev_i]
 
 
-def compute(close: list[float], slope_lookback: int = 5) -> dict:
+def compute(close: list[float], slope_lookback: int = 5,
+            high: Optional[list[float]] = None,
+            low: Optional[list[float]] = None,
+            with_garch: bool = True) -> dict:
     """
     Computes the entire stack and returns the latest values + recent slopes.
     `slope_lookback`: bars to measure the slope (default 5 ~ one week).
+    `high`/`low`: optional OHLC arrays; improve ATR/true-range precision.
     """
     if len(close) < 210:
         # Not a fatal error: EMA200 will simply be None. We warn about it.
@@ -195,9 +204,13 @@ def compute(close: list[float], slope_lookback: int = 5) -> dict:
             bars_since_below_ema20 = back
             break
 
+    # Volatility & mean-reversion block (ATR, GARCH, z-score, sizing)
+    vol = V.compute(close, high, low, with_garch=with_garch) if V is not None else None
+
     return {
         "n_bars": len(close),
         "warning": warn,
+        "volatility": vol,
         "close": close[-1],
         "ema20": last(ema20), "ema50": last(ema50), "ema200": last(ema200),
         "ema20_slope": _slope(ema20, slope_lookback),
@@ -213,8 +226,14 @@ def compute(close: list[float], slope_lookback: int = 5) -> dict:
     }
 
 
-def _round(d: dict, nd: int = 4) -> dict:
-    return {k: (round(v, nd) if isinstance(v, float) else v) for k, v in d.items()}
+def _round(d, nd: int = 4):
+    if isinstance(d, float):
+        return round(d, nd)
+    if isinstance(d, dict):
+        return {k: _round(v, nd) for k, v in d.items()}
+    if isinstance(d, list):
+        return [_round(v, nd) for v in d]
+    return d
 
 
 def main() -> int:
@@ -224,17 +243,22 @@ def main() -> int:
     ap.add_argument("--slope-lookback", type=int, default=5)
     args = ap.parse_args()
 
+    high = low = None
     if args.input:
         with open(args.input) as f:
             raw = json.load(f)
         close = raw["close"] if isinstance(raw, dict) else raw
         close = [float(x) for x in close]
+        if isinstance(raw, dict):
+            high = [float(x) for x in raw["high"]] if raw.get("high") else None
+            low = [float(x) for x in raw["low"]] if raw.get("low") else None
     else:
         import math
         close = [round(100 + 18 * math.sin(i / 22) + i * 0.06, 2) for i in range(290)]
         print("[self-test: synthetic series of 290 bars]\n", file=sys.stderr)
 
-    print(json.dumps(_round(compute(close, args.slope_lookback)), indent=2, ensure_ascii=False))
+    print(json.dumps(_round(compute(close, args.slope_lookback, high, low)),
+                     indent=2, ensure_ascii=False))
     return 0
 
 

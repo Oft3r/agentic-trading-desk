@@ -88,6 +88,9 @@ def _flags(ind: dict) -> dict:
     trix, trix_sig = ind["trix"], ind["trix_signal"]
     pb = ind["percent_b"]
     stretch = (c / e20 - 1.0) if e20 else 0.0
+    vol = ind.get("volatility") or {}
+    z20 = vol.get("zscore_20")
+    atr = vol.get("atr")
 
     exhaustion, bearish, rebound = [], [], []
 
@@ -98,8 +101,18 @@ def _flags(ind: dict) -> dict:
         exhaustion.append("MACD histogram shrinking in positive territory")
     if pb is not None and pb >= 1.0:
         exhaustion.append("price at/above upper Bollinger Band (%B≥1)")
-    if stretch >= 0.10:
+    # Volatility-adjusted stretch: distance to EMA20 in ATR units when ATR is
+    # available (2.5 ATRs = statistically stretched regardless of the name's
+    # vol profile); raw 10% threshold kept as fallback for short histories.
+    if atr and e20:
+        stretch_atr = (c - e20) / atr
+        if stretch_atr >= 2.5:
+            exhaustion.append(
+                f"price stretched {stretch_atr:.1f} ATRs above EMA20")
+    elif stretch >= 0.10:
         exhaustion.append(f"price stretched {stretch*100:.0f}% above EMA20")
+    if z20 is not None and z20 >= 2.0:
+        exhaustion.append(f"z-score +{z20:.1f}σ vs 20d mean (statistical extreme)")
 
     # --- Relentless bearish ---
     if e50 and e200 and s200 is not None and c < e50 and e50 < e200 and s200 < 0:
@@ -127,6 +140,14 @@ def _flags(ind: dict) -> dict:
     if (trix is not None and trix_sig is not None and trix_p is not None and sig_p is not None
             and trix > trix_sig and trix_p <= sig_p and trix <= 0):
         rebound.append("fresh bullish TRIX cross below zero")
+    # Statistical washout: 2σ+ below 20d mean on a mean-reverting name is a
+    # quantitative rebound setup (only counts when AR(1) confirms reversion).
+    ar1 = vol.get("ar1") or {}
+    if (z20 is not None and z20 <= -2.0 and ar1.get("mean_reverting")
+            and rsi is not None and rsi_p is not None and rsi > rsi_p):
+        rebound.append(
+            f"z-score {z20:.1f}σ washout on mean-reverting name "
+            f"(half-life {ar1['half_life_bars']:.0f} bars)")
 
     # Structure in a true death-cross (not proxied by trend score)
     death_cross = bool(e50 and e200 and e50 < e200 and c < e50)
@@ -232,10 +253,43 @@ def decide(ind: dict, trend: int, mom: int, macro: Optional[int],
 # Full Scorecard Card
 # --------------------------------------------------------------------------
 
+def _risk_block(ind: dict, action: str) -> Optional[dict]:
+    """
+    ATR-based dynamic risk levels + vol-target sizing for the proposal.
+    Tactical (counter-trend) trades get a tighter 1.5-ATR stop instead of
+    the 3-ATR chandelier; size fraction comes from GARCH/EWMA vol targeting.
+    """
+    vol = ind.get("volatility")
+    if not vol or vol.get("atr") is None:
+        return None
+    c = ind["close"]
+    atr = vol["atr"]
+    tactical = action.startswith("TACTICAL")
+    stop = (c - 1.5 * atr) if tactical else vol.get("chandelier_stop")
+    g = vol.get("garch") or {}
+    size = vol.get("vol_target_fraction")
+    if tactical and size is not None:
+        size = round(size * 0.5, 4)  # halve counter-trend size
+    return {
+        "atr": atr,
+        "atr_pct": vol.get("atr_pct"),
+        "suggested_stop": stop,
+        "stop_distance_pct": round((c - stop) / c * 100, 2) if stop else None,
+        "stop_type": "1.5×ATR tactical" if tactical else "3×ATR chandelier (22-bar)",
+        "vol_target_fraction": size,
+        "forecast_vol_annual": g.get("forecast_vol_annual") or vol.get("ewma_vol_annual"),
+        "vol_ratio": g.get("vol_ratio"),
+        "zscore_20": vol.get("zscore_20"),
+    }
+
+
 def score_symbol(close: list[float], macro_score: Optional[int] = None,
                  symbol: Optional[str] = None, holding: Optional[bool] = None,
-                 slope_lookback: int = 5) -> dict:
-    ind = I.compute(close, slope_lookback)
+                 slope_lookback: int = 5,
+                 high: Optional[list[float]] = None,
+                 low: Optional[list[float]] = None,
+                 with_garch: bool = True) -> dict:
+    ind = I.compute(close, slope_lookback, high, low, with_garch)
     t, t_detail = score_trend(ind)
     m, m_detail = score_momentum(ind)
     dec = decide(ind, t, m, macro_score, holding)
@@ -251,6 +305,7 @@ def score_symbol(close: list[float], macro_score: Optional[int] = None,
         },
         "pillar_total": composite,
         "decision": dec,
+        "risk": I._round(_risk_block(ind, dec["action"]) or {}) or None,
         "indicators": I._round(ind),
     }
 
@@ -283,6 +338,21 @@ def render(card: dict) -> str:
         L.append(f"    rebound: {'; '.join(f['rebound'])}")
     if f.get("death_cross"):
         L.append("    structure: active death-cross (EMA50<EMA200, price<EMA50)")
+    r = card.get("risk")
+    if r:
+        L.append(f"  {'─'*50}")
+        stop = r.get("suggested_stop")
+        if stop is not None:
+            L.append(f"  RISK  stop {stop:.2f} ({r['stop_distance_pct']}% away, "
+                     f"{r['stop_type']})")
+        if r.get("vol_target_fraction") is not None:
+            fv = r.get("forecast_vol_annual")
+            L.append(f"        size {r['vol_target_fraction']*100:.0f}% of sleeve "
+                     f"(vol-target 15% vs forecast "
+                     f"{fv*100:.0f}%)" if fv else
+                     f"        size {r['vol_target_fraction']*100:.0f}% of sleeve")
+        if r.get("vol_ratio") is not None and r["vol_ratio"] >= 1.3:
+            L.append(f"        ⚠ GARCH vol {r['vol_ratio']:.1f}× long-run — vol expanding")
     if card["warning"]:
         L.append(f"    ⚠ {card['warning']}")
     return "\n".join(L)
@@ -302,6 +372,8 @@ def main() -> int:
             macro_score=raw.get("macro_score"),
             symbol=raw.get("symbol"),
             holding=raw.get("holding"),
+            high=[float(x) for x in raw["high"]] if raw.get("high") else None,
+            low=[float(x) for x in raw["low"]] if raw.get("low") else None,
         )
     else:
         import math

@@ -27,6 +27,11 @@ import sys
 from dataclasses import dataclass, field, asdict
 from typing import Optional
 
+try:
+    import regime as R
+except ImportError:
+    R = None
+
 
 # --------------------------------------------------------------------------
 # Numerical utilities (no numpy, to keep it clean on your Ubuntu)
@@ -122,6 +127,7 @@ class MacroResult:
     spy_tlt_corr: Optional[float]
     components: list[dict] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    stat_regime: Optional[dict] = None
 
 
 # Canonical weights from original skill
@@ -276,6 +282,25 @@ def score_macro(data: dict, fast: int = 50, slow: int = 200,
         plabel = f"Adverse macro (cap due to {regime} regime)"
         notes.append(f"Pillar capped at -1 due to {regime} regime.")
 
+    # --- Statistical regime (GMM+HMM on SPY returns), independent check ---
+    stat_regime = None
+    if R is not None and spy:
+        stat_regime = R.classify(spy)
+        if stat_regime is not None:
+            stat_regime = {k: (round(v, 4) if isinstance(v, float) else v)
+                           for k, v in stat_regime.items()
+                           if k != "gmm_weights"}
+            # Turbulent state with high confidence caps the pillar at 0:
+            # ratio trends lag; the vol regime flips first.
+            if (stat_regime["state"] == "turbulent"
+                    and stat_regime["p_turbulent"] >= 0.8 and pillar > 0):
+                pillar = 0
+                plabel = f"{plabel} (capped: turbulent vol regime)"
+                notes.append(
+                    "Pillar capped at 0: GMM/HMM detects turbulent volatility "
+                    f"regime on SPY (p={stat_regime['p_turbulent']:.2f}, "
+                    f"{stat_regime['bars_in_state']} bars).")
+
     return MacroResult(
         as_of=data.get("as_of", ""),
         composite=round(composite, 3),
@@ -289,6 +314,7 @@ def score_macro(data: dict, fast: int = 50, slow: int = 200,
             for c in comps.values()
         ],
         notes=notes,
+        stat_regime=stat_regime,
     )
 
 
@@ -306,6 +332,13 @@ def render(r: MacroResult) -> str:
     if r.spy_tlt_corr is not None:
         L.append(f"SPY-TLT Corr   : {r.spy_tlt_corr:+.3f}"
                  f"{'  ⚠ inflationary flag' if r.inflationary_flag else ''}")
+    if r.stat_regime:
+        s = r.stat_regime
+        L.append(f"Vol regime     : {s['state'].upper()}  "
+                 f"p_turb={s['p_turbulent']:.2f}  "
+                 f"({s['bars_in_state']} bars; "
+                 f"σ calm {s['calm_vol_annual']*100:.0f}% / "
+                 f"turb {s['turbulent_vol_annual']*100:.0f}%)")
     L.append("-" * 52)
     L.append("Components:")
     for c in r.components:
