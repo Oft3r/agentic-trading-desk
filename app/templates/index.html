@@ -1,0 +1,806 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>QUANTUM_OS — Agentic Trading Desk</title>
+  <style>
+    /* ── Reset & tokens ─────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --green:  #00ff41;
+      --green2: #00cc33;
+      --amber:  #f0a500;
+      --orange: #e06b00;
+      --red:    #ff4444;
+      --blue:   #4da6ff;
+      --bg:     #0a0a0a;
+      --panel:  #111111;
+      --card:   #161b22;
+      --border: #1e1e1e;
+      --border2:#2a2a2a;
+      --text:   #dde1e7;
+      --dim:    #666;
+      --dim2:   #444;
+      --font:   'JetBrains Mono','Cascadia Code','Fira Code','Courier New',ui-monospace,monospace;
+      --topbar-h: 52px;
+      --sidebar-w: 60px;
+    }
+    html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 13px; }
+
+    /* ── Layout grid ────────────────────────────── */
+    body {
+      display: grid;
+      grid-template-rows: var(--topbar-h) 1fr;
+      grid-template-columns: var(--sidebar-w) 1fr;
+      grid-template-areas: "top top" "side main";
+      height: 100vh;
+    }
+
+    /* ── Top bar ────────────────────────────────── */
+    .topbar {
+      grid-area: top;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 16px;
+      background: #0d0d0d;
+      border-bottom: 1px solid var(--border2);
+      z-index: 100;
+    }
+    .topbar-left { display: flex; align-items: center; gap: 0; }
+    .logo {
+      font-size: 17px; font-weight: 900; letter-spacing: .12em;
+      color: var(--green);
+      text-shadow: 0 0 12px rgba(0,255,65,.4);
+      margin-right: 28px; white-space: nowrap;
+    }
+    .nav-tabs { display: flex; gap: 0; }
+    .tab-btn {
+      background: none; border: none; cursor: pointer;
+      padding: 0 18px;
+      height: var(--topbar-h);
+      font-family: var(--font); font-size: 12px; letter-spacing: .06em;
+      color: var(--dim); text-transform: none;
+      border-bottom: 2px solid transparent;
+      transition: color .15s, border-color .15s;
+    }
+    .tab-btn:hover { color: var(--text); }
+    .tab-btn.active { color: var(--green); border-bottom-color: var(--green); }
+
+    .topbar-right { display: flex; align-items: center; gap: 16px; }
+    .market-strip { display: flex; gap: 2px; align-items: center; }
+    .mkt-item {
+      padding: 4px 10px; border-radius: 3px; background: var(--card);
+      border: 1px solid var(--border2); font-size: 11px; letter-spacing: .04em;
+    }
+    .mkt-item.up   { color: var(--green); }
+    .mkt-item.down { color: var(--red); }
+    .mkt-item.sent { color: var(--amber); }
+    .topbar-icons { display: flex; gap: 4px; }
+    .icon-btn {
+      background: none; border: 1px solid var(--border2);
+      color: var(--dim); cursor: pointer; border-radius: 4px;
+      width: 28px; height: 28px; font-size: 13px;
+      display: flex; align-items: center; justify-content: center;
+      transition: color .15s, border-color .15s;
+    }
+    .icon-btn:hover { color: var(--text); border-color: var(--dim); }
+
+    /* ── Left sidebar ───────────────────────────── */
+    .sidebar {
+      grid-area: side;
+      background: #0d0d0d;
+      border-right: 1px solid var(--border2);
+      display: flex; flex-direction: column; align-items: center;
+      padding: 12px 0; gap: 4px;
+    }
+    .sb-icon {
+      width: 38px; height: 38px; border-radius: 6px;
+      background: none; border: 1px solid transparent;
+      color: var(--dim); cursor: pointer; font-size: 15px;
+      display: flex; align-items: center; justify-content: center;
+      transition: background .15s, color .15s;
+    }
+    .sb-icon:hover { background: var(--card); color: var(--text); }
+    .sb-icon.active { background: var(--green); color: #000; box-shadow: 0 0 10px rgba(0,255,65,.3); }
+    .sb-sep { width: 24px; height: 1px; background: var(--border2); margin: 6px 0; }
+
+    /* ── Main content area ──────────────────────── */
+    .main { grid-area: main; overflow: hidden; position: relative; }
+    .tab-panel { display: none; width: 100%; height: 100%; }
+    .tab-panel.active { display: flex; }
+
+    /* ══ PORTFOLIO TAB ══════════════════════════════ */
+    #tab-portfolio { flex-direction: row; }
+
+    /* ── Scanner (left) ─────────────────────────── */
+    .scanner-pane {
+      width: 58%; min-width: 340px;
+      border-right: 1px solid var(--border2);
+      display: flex; flex-direction: column;
+      overflow: hidden;
+    }
+    .pane-header {
+      padding: 10px 14px 8px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border2);
+      display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+    }
+    .pane-title { font-size: 13px; font-weight: 700; letter-spacing: .06em; }
+
+    /* Scan input form */
+    .scan-form {
+      padding: 10px 14px;
+      background: #0e0e0e;
+      border-bottom: 1px solid var(--border2);
+      display: grid;
+      grid-template-columns: 100px 1fr;
+      grid-template-rows: auto auto auto;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+    .scan-form label { font-size: 11px; color: var(--dim); align-self: center; }
+    .scan-input, .scan-textarea {
+      background: var(--card); border: 1px solid var(--border2);
+      color: var(--text); font-family: var(--font); font-size: 12px;
+      padding: 5px 8px; border-radius: 3px;
+      transition: border-color .15s;
+    }
+    .scan-input:focus, .scan-textarea:focus { outline: none; border-color: var(--green2); }
+    .scan-textarea { resize: vertical; min-height: 52px; }
+    .scan-form-row { display: flex; align-items: center; gap: 10px; }
+    .scan-checkbox-label { font-size: 12px; color: var(--dim); display: flex; align-items: center; gap: 5px; }
+    .scan-btn {
+      background: var(--green); color: #000; border: none; cursor: pointer;
+      font-family: var(--font); font-size: 12px; font-weight: 700; letter-spacing: .08em;
+      padding: 6px 18px; border-radius: 3px;
+      transition: background .15s, box-shadow .15s;
+    }
+    .scan-btn:hover { background: #00e639; box-shadow: 0 0 10px rgba(0,255,65,.3); }
+    .scan-btn:disabled { background: var(--dim2); color: var(--dim); cursor: not-allowed; }
+
+    /* Grid filter bar */
+    .grid-filter-bar {
+      padding: 6px 14px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border2);
+      display: flex; align-items: center; gap: 12px;
+      font-size: 11px; color: var(--dim); flex-shrink: 0;
+    }
+    .filter-label { color: var(--dim); }
+    .filter-val { color: var(--green); font-weight: 700; }
+
+    /* Scanner table */
+    .scanner-table-wrap { overflow-y: auto; flex: 1; }
+    .scanner-table { width: 100%; border-collapse: collapse; }
+    .scanner-table thead th {
+      position: sticky; top: 0; background: #0e0e0e;
+      padding: 7px 10px; text-align: left;
+      font-size: 10px; letter-spacing: .1em; color: var(--dim); font-weight: 400;
+      border-bottom: 1px solid var(--border2);
+      white-space: nowrap;
+    }
+    .scanner-table thead th.r { text-align: right; }
+    .scanner-row td {
+      padding: 9px 10px;
+      border-bottom: 1px solid #181818;
+      vertical-align: middle;
+    }
+    .scanner-row { cursor: pointer; transition: background .1s; }
+    .scanner-row:hover { background: #141414; }
+    .scanner-row.active { background: rgba(0,255,65,.04); border-left: 2px solid var(--green); }
+    .sym-name { font-weight: 700; letter-spacing: .06em; }
+    .td-price, .td-score { text-align: right; font-variant-numeric: tabular-nums; }
+    .td-trend  { width: 72px; }
+    .td-flags  { white-space: nowrap; }
+    .td-action { text-align: center; width: 80px; }
+
+    /* Badge */
+    .badge {
+      display: inline-block; font-size: 9px; font-weight: 700; letter-spacing: .06em;
+      padding: 2px 5px; border-radius: 2px; margin-right: 3px;
+    }
+    .badge.green  { background: rgba(0,255,65,.12);  color: var(--green);  border: 1px solid rgba(0,255,65,.2); }
+    .badge.amber  { background: rgba(240,165,0,.12); color: var(--amber);  border: 1px solid rgba(240,165,0,.25); }
+    .badge.orange { background: rgba(224,107,0,.12); color: var(--orange); border: 1px solid rgba(224,107,0,.25); }
+    .badge.red    { background: rgba(255,68,68,.12); color: var(--red);    border: 1px solid rgba(255,68,68,.2); }
+    .badge.dim    { background: rgba(80,80,80,.12);  color: var(--dim);    border: 1px solid var(--border2); }
+
+    /* Action button */
+    .action-btn {
+      font-family: var(--font); font-size: 10px; font-weight: 700; letter-spacing: .06em;
+      padding: 4px 8px; border-radius: 2px; cursor: pointer; border: 1px solid;
+      transition: opacity .15s;
+    }
+    .action-btn:hover { opacity: .8; }
+    .ac-exit  { background: rgba(255,68,68,.12); color: var(--red);    border-color: rgba(255,68,68,.3); }
+    .ac-enter { background: rgba(0,255,65,.1);  color: var(--green);  border-color: rgba(0,255,65,.25); }
+    .ac-hold  { background: rgba(77,166,255,.1);color: var(--blue);   border-color: rgba(77,166,255,.25); }
+    .ac-wait  { background: rgba(240,165,0,.1); color: var(--amber);  border-color: rgba(240,165,0,.25); }
+
+    /* ── Analyst panel (right) ───────────────────── */
+    .analyst-pane {
+      flex: 1;
+      display: flex; flex-direction: column;
+      overflow: hidden; background: var(--panel);
+    }
+    .analyst-header {
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border2);
+      display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+    }
+    .analyst-title { font-size: 13px; font-weight: 700; }
+    .analyst-sym { color: var(--green); }
+    .model-badge {
+      font-size: 10px; color: var(--dim); letter-spacing: .08em;
+      background: var(--card); border: 1px solid var(--border2);
+      padding: 2px 8px; border-radius: 3px;
+    }
+    .analyst-feed {
+      flex: 1; overflow-y: auto; padding: 14px 16px;
+      display: flex; flex-direction: column; gap: 12px;
+    }
+    .feed-msg { display: flex; flex-direction: column; gap: 4px; }
+    .feed-msg.user {
+      align-self: flex-end; max-width: 80%;
+      background: #1e2230; border: 1px solid #2a3050;
+      border-radius: 8px 8px 2px 8px; padding: 10px 14px;
+    }
+    .feed-msg.system { max-width: 100%; }
+    .feed-ts   { font-size: 11px; color: var(--dim); }
+    .feed-text { font-size: 13px; line-height: 1.55; }
+    .feed-dim  { font-size: 11px; color: var(--dim); margin-top: 2px; }
+    .feed-terminal {
+      background: #080808; border: 1px solid #1a2a1a;
+      border-radius: 4px; padding: 10px 14px; margin-top: 4px;
+    }
+    .feed-term-line { font-size: 12px; color: var(--green); line-height: 1.7; }
+    .feed-flags-block { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
+    .feed-flag { font-size: 12px; line-height: 1.6; }
+    .feed-flag.exh  { color: var(--amber); }
+    .feed-flag.bear { color: var(--red); }
+    .feed-flag.reb  { color: var(--green); }
+    .feed-event {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 11px; color: var(--dim);
+    }
+    .feed-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--amber); flex-shrink: 0;
+    }
+    .analyst-input-row {
+      display: flex; gap: 0; border-top: 1px solid var(--border2); flex-shrink: 0;
+    }
+    .analyst-input {
+      flex: 1; background: #0d0d0d; border: none;
+      color: var(--text); font-family: var(--font); font-size: 13px;
+      padding: 12px 14px;
+    }
+    .analyst-input::placeholder { color: var(--dim2); }
+    .analyst-input:focus { outline: none; }
+    .analyst-send {
+      background: none; border: none; border-left: 1px solid var(--border2);
+      color: var(--green); cursor: pointer; padding: 0 16px; font-size: 18px;
+      transition: background .15s;
+    }
+    .analyst-send:hover { background: rgba(0,255,65,.06); }
+
+    /* ══ BACKTEST TAB ═══════════════════════════════ */
+    #tab-backtest { gap: 0; }
+    .bt-left {
+      width: 300px; flex-shrink: 0;
+      border-right: 1px solid var(--border2);
+      display: flex; flex-direction: column;
+      overflow-y: auto; background: var(--panel);
+    }
+    .bt-right {
+      flex: 1; overflow-y: auto; padding: 16px;
+      background: var(--bg);
+    }
+    .form-section { padding: 14px 14px 10px; border-bottom: 1px solid var(--border2); }
+    .form-title { font-size: 11px; letter-spacing: .1em; color: var(--dim); margin-bottom: 10px; }
+    .form-row { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+    .form-label { font-size: 11px; color: var(--dim); }
+    .form-input {
+      background: var(--card); border: 1px solid var(--border2);
+      color: var(--text); font-family: var(--font); font-size: 12px;
+      padding: 5px 8px; border-radius: 3px;
+      transition: border-color .15s;
+    }
+    .form-input:focus { outline: none; border-color: var(--green2); }
+    .form-textarea { resize: vertical; min-height: 80px; }
+    .form-checkbox-row { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-bottom: 6px; }
+    .run-btn {
+      width: 100%; background: var(--green); color: #000; border: none; cursor: pointer;
+      font-family: var(--font); font-size: 12px; font-weight: 700; letter-spacing: .08em;
+      padding: 8px; border-radius: 3px; margin-top: 4px;
+      transition: background .15s, box-shadow .15s;
+    }
+    .run-btn:hover { background: #00e639; box-shadow: 0 0 10px rgba(0,255,65,.25); }
+    .run-btn:disabled { background: var(--dim2); color: var(--dim); cursor: not-allowed; }
+
+    /* Backtest results */
+    .bt-header-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 14px; }
+    .bt-period { font-size: 13px; font-weight: 700; }
+    .bt-metrics-grid {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px;
+    }
+    .bt-metric {
+      background: var(--card); border: 1px solid var(--border2);
+      border-radius: 4px; padding: 10px 12px;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .bt-metric .dim-text { font-size: 10px; letter-spacing: .06em; }
+    .bt-metric span:last-child { font-size: 15px; font-weight: 700; }
+    .bt-section-title {
+      font-size: 10px; letter-spacing: .12em; color: var(--dim);
+      margin-bottom: 6px; text-transform: uppercase;
+    }
+
+    /* ══ RISK ENGINE TAB ════════════════════════════ */
+    #tab-riskengine { gap: 0; }
+    .vol-left {
+      width: 300px; flex-shrink: 0;
+      border-right: 1px solid var(--border2);
+      display: flex; flex-direction: column;
+      overflow-y: auto; background: var(--panel);
+    }
+    .vol-right {
+      flex: 1; overflow-y: auto; padding: 16px;
+      background: var(--bg);
+    }
+    .vol-section {
+      font-size: 10px; letter-spacing: .12em; color: var(--dim);
+      margin: 12px 0 6px; text-transform: uppercase;
+    }
+    .vol-row {
+      display: flex; align-items: baseline; gap: 8px;
+      padding: 4px 0; border-bottom: 1px solid #161616;
+    }
+    .vol-key  { color: var(--dim); font-size: 12px; width: 180px; flex-shrink: 0; }
+    .vol-val  { font-size: 13px; font-weight: 700; }
+    .vol-note { font-size: 11px; margin-left: auto; }
+
+    /* ══ OTHER TABS (stubs) ════════════════════════ */
+    #tab-orderflow, #tab-terminals {
+      align-items: center; justify-content: center;
+      color: var(--dim2); font-size: 14px; letter-spacing: .06em;
+    }
+
+    /* ══ MODAL ══════════════════════════════════════ */
+    .modal-overlay {
+      position: fixed; inset: 0; z-index: 200;
+      background: rgba(0,0,0,.75); backdrop-filter: blur(2px);
+      display: flex; align-items: flex-end; justify-content: center;
+      padding-bottom: 40px;
+    }
+    .modal-overlay.hidden { display: none; }
+    .modal {
+      background: #111217; border: 1px solid var(--amber);
+      border-radius: 8px; width: 520px; max-width: 95vw;
+      box-shadow: 0 0 40px rgba(240,165,0,.15);
+      display: flex; flex-direction: column; max-height: 90vh; overflow: hidden;
+    }
+    .modal-head {
+      padding: 14px 18px 10px;
+      border-bottom: 1px solid #1e1e1e;
+      display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+    }
+    .modal-warning {
+      font-size: 12px; font-weight: 700; letter-spacing: .1em;
+      color: var(--amber); display: flex; align-items: center; gap: 8px;
+    }
+    .modal-close {
+      background: none; border: none; color: var(--dim); cursor: pointer; font-size: 18px; line-height: 1;
+    }
+    .modal-close:hover { color: var(--text); }
+    .modal-body {
+      padding: 14px 18px; overflow-y: auto; flex: 1;
+    }
+    .modal-kv-grid {
+      display: grid; grid-template-columns: 110px 1fr; gap: 6px 12px;
+      font-size: 13px; margin-bottom: 14px;
+    }
+    .modal-k { color: var(--dim); align-self: center; }
+    .modal-v { font-weight: 700; }
+    .modal-action-val.ac-exit  { color: var(--red); }
+    .modal-action-val.ac-enter { color: var(--green); }
+    .modal-action-val.ac-hold  { color: var(--blue); }
+    .modal-action-val.ac-wait  { color: var(--amber); }
+    .modal-divider { height: 1px; background: var(--border2); margin: 12px 0; }
+    .modal-form-title { font-size: 10px; letter-spacing: .1em; color: var(--dim); margin-bottom: 10px; }
+    .modal-form-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px;
+    }
+    .modal-form-row { display: flex; flex-direction: column; gap: 4px; }
+    .modal-form-label { font-size: 11px; color: var(--dim); }
+    .modal-form-input {
+      background: var(--card); border: 1px solid var(--border2);
+      color: var(--text); font-family: var(--font); font-size: 12px;
+      padding: 6px 8px; border-radius: 3px;
+    }
+    .modal-form-input:focus { outline: none; border-color: var(--green2); }
+    .modal-form-select {
+      background: var(--card); border: 1px solid var(--border2);
+      color: var(--text); font-family: var(--font); font-size: 12px;
+      padding: 6px 8px; border-radius: 3px;
+    }
+    #plan-output {
+      background: #080808; border: 1px solid #1a1a1a;
+      border-radius: 4px; padding: 10px 12px; margin-top: 12px;
+      min-height: 40px; font-size: 12px;
+    }
+    .plan-status { font-weight: 700; margin-bottom: 8px; letter-spacing: .06em; }
+    .plan-row { display: flex; gap: 8px; padding: 2px 0; font-size: 12px; }
+    .plan-table { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 6px; }
+    .plan-table th { color: var(--dim); font-weight: 400; padding: 3px 6px; text-align: left; border-bottom: 1px solid var(--border2); }
+    .plan-table td { padding: 3px 6px; border-bottom: 1px solid #161616; }
+    .plan-table td.r { text-align: right; }
+    .chk-green { color: var(--green); }
+    .chk-amber { color: var(--amber); }
+    .chk-red   { color: var(--red); }
+    .chk-dim   { color: var(--dim); }
+    .modal-footer {
+      padding: 12px 18px;
+      border-top: 1px solid var(--border2);
+      display: flex; gap: 10px; flex-shrink: 0;
+    }
+    .modal-size-hint { font-size: 11px; color: var(--dim); margin-top: 4px; }
+    .btn-cancel {
+      flex: 1; background: none; border: 1px solid var(--border2);
+      color: var(--dim); font-family: var(--font); font-size: 12px; font-weight: 700;
+      letter-spacing: .08em; padding: 10px; border-radius: 3px; cursor: pointer;
+      transition: border-color .15s, color .15s;
+    }
+    .btn-cancel:hover { border-color: var(--dim); color: var(--text); }
+    .btn-build {
+      flex: 1; background: var(--card); border: 1px solid var(--border2);
+      color: var(--amber); font-family: var(--font); font-size: 12px; font-weight: 700;
+      letter-spacing: .08em; padding: 10px; border-radius: 3px; cursor: pointer;
+      transition: background .15s, box-shadow .15s;
+    }
+    .btn-build:hover { background: rgba(240,165,0,.1); }
+    .btn-confirm {
+      flex: 1.5; background: var(--amber); border: none;
+      color: #000; font-family: var(--font); font-size: 12px; font-weight: 900;
+      letter-spacing: .1em; padding: 10px; border-radius: 3px; cursor: pointer;
+      transition: background .15s, box-shadow .15s;
+    }
+    .btn-confirm:hover { background: #ffb800; box-shadow: 0 0 14px rgba(240,165,0,.4); }
+    .btn-confirm:disabled { background: var(--dim2); color: var(--dim); cursor: not-allowed; box-shadow: none; }
+
+    /* ── Toast ────────────────────────────────────── */
+    .toast {
+      position: fixed; bottom: 20px; right: 20px; z-index: 300;
+      padding: 10px 18px; border-radius: 4px; font-size: 12px; font-weight: 700;
+      pointer-events: none; opacity: 0; transform: translateY(10px);
+      transition: opacity .2s, transform .2s;
+    }
+    .toast.show    { opacity: 1; transform: translateY(0); }
+    .toast-success { background: rgba(0,255,65,.15); color: var(--green); border: 1px solid rgba(0,255,65,.3); }
+    .toast-error   { background: rgba(255,68,68,.15); color: var(--red);  border: 1px solid rgba(255,68,68,.3); }
+    .toast-info    { background: var(--card); color: var(--text); border: 1px solid var(--border2); }
+
+    /* ── Shared utilities ─────────────────────────── */
+    .dim-text { color: var(--dim); }
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #333; }
+  </style>
+</head>
+<body>
+
+<!-- ─── Top Bar ─────────────────────────────────────────── -->
+<nav class="topbar">
+  <div class="topbar-left">
+    <span class="logo">QUANTUM_OS</span>
+    <div class="nav-tabs">
+      <button class="tab-btn" data-tab="portfolio">Portfolio</button>
+      <button class="tab-btn" data-tab="orderflow">OrderFlow</button>
+      <button class="tab-btn" data-tab="riskengine">RiskEngine</button>
+      <button class="tab-btn" data-tab="backtest">Backtest</button>
+      <button class="tab-btn" data-tab="terminals">Terminals</button>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <div class="market-strip">
+      <span class="mkt-item up">↑ SPX —</span>
+      <span class="mkt-item down">↓ VIX —</span>
+      <span class="mkt-item sent" id="market-sentiment">SENTIMENT: —</span>
+    </div>
+    <div class="topbar-icons">
+      <button class="icon-btn" title="Alerts">🔔</button>
+      <button class="icon-btn" title="Settings">⚙</button>
+      <button class="icon-btn" title="Power">⏻</button>
+    </div>
+  </div>
+</nav>
+
+<!-- ─── Sidebar ──────────────────────────────────────────── -->
+<aside class="sidebar">
+  <button class="sb-icon" title="Profile">&#9786;</button>
+  <button class="sb-icon" title="New Scan">＋</button>
+  <div class="sb-sep"></div>
+  <button class="sb-icon active" title="Portfolio" onclick="switchTab('portfolio')">⊞</button>
+  <button class="sb-icon" title="Chart" onclick="switchTab('riskengine')">📈</button>
+  <button class="sb-icon" title="Backtest" onclick="switchTab('backtest')">⊘</button>
+  <button class="sb-icon" title="OrderFlow" onclick="switchTab('orderflow')">⤸</button>
+  <div class="sb-sep"></div>
+  <button class="sb-icon" title="Terminals" onclick="switchTab('terminals')">⌨</button>
+</aside>
+
+<!-- ─── Main Content ─────────────────────────────────────── -->
+<div class="main">
+
+  <!-- ═══ PORTFOLIO TAB ═════════════════════════════════════ -->
+  <div id="tab-portfolio" class="tab-panel">
+
+    <!-- Scanner grid (left) -->
+    <div class="scanner-pane">
+      <div class="pane-header">
+        <span class="pane-title">Data Scanner Grid</span>
+        <span class="dim-text" style="font-size:11px">SORT: SCORE DESC</span>
+      </div>
+
+      <!-- Scan input form -->
+      <div class="scan-form">
+        <label>Symbol</label>
+        <input id="scan-symbol" class="scan-input" type="text"
+               placeholder="AAPL" maxlength="10" spellcheck="false">
+
+        <label>Closes</label>
+        <textarea id="scan-closes" class="scan-input scan-textarea"
+                  placeholder='[220.5, 221.1, 219.8, ...] or comma-separated (≥30 bars)'
+                  spellcheck="false"></textarea>
+
+        <label style="align-self:start;padding-top:4px">Options</label>
+        <div class="scan-form-row">
+          <label class="scan-checkbox-label">
+            Macro&nbsp;
+            <input id="scan-macro" class="scan-input"
+                   type="number" min="-2" max="2" value="0"
+                   style="width:48px;padding:4px 6px">
+          </label>
+          <label class="scan-checkbox-label">
+            <input id="scan-holding" type="checkbox"> Holding
+          </label>
+          <button id="scan-btn" class="scan-btn">SCAN</button>
+        </div>
+      </div>
+
+      <div class="grid-filter-bar">
+        <span class="filter-label">FILTERS:</span>
+        <span class="filter-val">ACTIVE</span>
+        <span class="filter-label" style="margin-left:auto">SORT:</span>
+        <span class="filter-val">SCORE DESC</span>
+      </div>
+
+      <div class="scanner-table-wrap">
+        <table class="scanner-table">
+          <thead>
+            <tr>
+              <th>TICKER</th>
+              <th class="r">PRICE</th>
+              <th class="r">SCORE</th>
+              <th>TREND</th>
+              <th>FLAGS</th>
+              <th>ACTION</th>
+            </tr>
+          </thead>
+          <tbody id="scanner-tbody">
+            <!-- rows injected by app.js -->
+          </tbody>
+        </table>
+      </div>
+    </div><!-- /scanner-pane -->
+
+    <!-- AI Analyst panel (right) -->
+    <div class="analyst-pane">
+      <div class="analyst-header">
+        <span class="analyst-title">
+          AI Analyst: <span id="analyst-symbol" class="analyst-sym">—</span>
+        </span>
+        <span class="model-badge">MODEL: QUANT-v7</span>
+      </div>
+
+      <div id="analyst-feed" class="analyst-feed">
+        <!-- Messages injected by app.js -->
+        <div class="feed-msg system">
+          <div class="feed-ts">Ready</div>
+          <div class="feed-text dim-text">
+            Enter a ticker symbol and close-price series above, then click SCAN.
+            The three-pillar scorecard, risk levels, and execution plan will appear here.
+          </div>
+        </div>
+      </div>
+
+      <div class="analyst-input-row">
+        <input id="analyst-input" class="analyst-input"
+               type="text" placeholder="Query AI Analyst...">
+        <button id="analyst-send" class="analyst-send">➤</button>
+      </div>
+    </div><!-- /analyst-pane -->
+
+  </div><!-- /tab-portfolio -->
+
+  <!-- ═══ ORDERFLOW TAB (stub) ══════════════════════════════ -->
+  <div id="tab-orderflow" class="tab-panel">
+    <span>ORDERFLOW — use execution_plan.py via the Portfolio tab</span>
+  </div>
+
+  <!-- ═══ RISK ENGINE TAB ═══════════════════════════════════ -->
+  <div id="tab-riskengine" class="tab-panel">
+    <div class="vol-left">
+      <div class="form-section">
+        <div class="form-title">VOLATILITY ENGINE INPUT</div>
+        <div class="form-row">
+          <label class="form-label">Close prices (JSON or comma-sep)</label>
+          <textarea id="vol-closes" class="form-input form-textarea"
+                    placeholder="[220.5, 221.1, ...]" spellcheck="false"></textarea>
+        </div>
+        <button id="vol-btn" class="run-btn">COMPUTE</button>
+      </div>
+      <div style="padding:12px 14px;font-size:11px;color:var(--dim);line-height:1.6">
+        Runs <code>volatility.py</code>:<br>
+        ATR-14 · Chandelier Stop<br>
+        EWMA Vol (λ=0.94) · GARCH(1,1)<br>
+        AR(1) half-life · 20d z-score<br>
+        Vol-target sizing (15% target)
+      </div>
+    </div>
+    <div id="vol-results" class="vol-right dim-text" style="padding:24px">
+      Results will appear here after COMPUTE.
+    </div>
+  </div><!-- /tab-riskengine -->
+
+  <!-- ═══ BACKTEST TAB ══════════════════════════════════════ -->
+  <div id="tab-backtest" class="tab-panel">
+    <div class="bt-left">
+      <div class="form-section">
+        <div class="form-title">DATA INPUT</div>
+        <div class="form-row">
+          <label class="form-label">Close prices (JSON array or comma-sep, ≥250 bars)</label>
+          <textarea id="bt-closes" class="form-input form-textarea"
+                    placeholder="[100.1, 100.8, ...]" style="min-height:120px"
+                    spellcheck="false"></textarea>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <div class="form-title">PARAMETERS</div>
+        <div class="modal-form-grid">
+          <div class="form-row">
+            <label class="form-label">Lag (bars)</label>
+            <input id="bt-lag" class="form-input" type="number" value="1" min="1" max="5">
+          </div>
+          <div class="form-row">
+            <label class="form-label">Cost (bps/side)</label>
+            <input id="bt-cost" class="form-input" type="number" value="5" min="0">
+          </div>
+          <div class="form-row">
+            <label class="form-label">Warmup (bars)</label>
+            <input id="bt-warmup" class="form-input" type="number" value="220" min="50">
+          </div>
+          <div class="form-row">
+            <label class="form-label">WF Splits</label>
+            <input id="bt-splits" class="form-input" type="number" value="3" min="0" max="8">
+          </div>
+        </div>
+        <div class="form-checkbox-row">
+          <input id="bt-sensitivity" type="checkbox" checked>
+          <label>Sensitivity grid (lag × cost)</label>
+        </div>
+        <div class="form-checkbox-row">
+          <input id="bt-nostop" type="checkbox">
+          <label>Disable ATR stop</label>
+        </div>
+        <button id="bt-btn" class="run-btn">RUN BACKTEST</button>
+      </div>
+
+      <div style="padding:12px 14px;font-size:11px;color:var(--dim);line-height:1.6">
+        Replays the exact <code>score.py</code> rules on history prefixes — no lookahead.
+        Walk-forward segments + lag×cost sensitivity prove edge stability.
+      </div>
+    </div><!-- /bt-left -->
+
+    <div id="bt-results" class="bt-right dim-text" style="padding:24px">
+      Results will appear here after RUN BACKTEST.
+    </div>
+  </div><!-- /tab-backtest -->
+
+  <!-- ═══ TERMINALS TAB (stub) ══════════════════════════════ -->
+  <div id="tab-terminals" class="tab-panel">
+    <span>TERMINALS — raw script I/O via Claude Code session</span>
+  </div>
+
+</div><!-- /main -->
+
+<!-- ─── Approval Modal ──────────────────────────────────── -->
+<div id="approval-modal" class="modal-overlay hidden" role="dialog" aria-modal="true"
+     aria-labelledby="modal-warning-text">
+
+  <div class="modal">
+    <div class="modal-head">
+      <div class="modal-warning">
+        <span>⚠</span>
+        <span id="modal-warning-text">MANUAL APPROVAL REQUIRED</span>
+      </div>
+      <button id="modal-close" class="modal-close" aria-label="Close">✕</button>
+    </div>
+
+    <div class="modal-body">
+      <!-- Scorecard summary -->
+      <div class="modal-kv-grid">
+        <span class="modal-k">ASSET</span>
+        <span class="modal-v" id="modal-symbol" style="color:var(--green)">—</span>
+
+        <span class="modal-k">ACTION</span>
+        <span class="modal-v modal-action-val" id="modal-action">—</span>
+
+        <span class="modal-k">LAST PRICE</span>
+        <span class="modal-v" id="modal-price">—</span>
+
+        <span class="modal-k">SCORE</span>
+        <span class="modal-v" id="modal-score">—</span>
+
+        <span class="modal-k">STOP</span>
+        <span class="modal-v" id="modal-stop" style="color:var(--amber)">—</span>
+      </div>
+      <div id="modal-size-hint" class="modal-size-hint"></div>
+
+      <div class="modal-divider"></div>
+
+      <!-- Order input -->
+      <div class="modal-form-title">ORDER DETAILS</div>
+      <div class="modal-form-grid">
+        <div class="modal-form-row">
+          <label class="modal-form-label">Qty (shares)</label>
+          <input id="modal-qty" class="modal-form-input" type="number" min="1" placeholder="100">
+        </div>
+        <div class="modal-form-row">
+          <label class="modal-form-label">Urgency</label>
+          <select id="modal-urgency" class="modal-form-select">
+            <option value="low">Low (passive)</option>
+            <option value="normal" selected>Normal (mid)</option>
+            <option value="high">High (aggressive)</option>
+          </select>
+        </div>
+        <div class="modal-form-row">
+          <label class="modal-form-label">Bid</label>
+          <input id="modal-bid" class="modal-form-input" type="number" step="0.01" placeholder="219.50">
+        </div>
+        <div class="modal-form-row">
+          <label class="modal-form-label">Ask</label>
+          <input id="modal-ask" class="modal-form-input" type="number" step="0.01" placeholder="219.55">
+        </div>
+        <div class="modal-form-row">
+          <label class="modal-form-label">Quote age (s)</label>
+          <input id="modal-age" class="modal-form-input" type="number" step="0.1" value="2.0">
+        </div>
+        <div class="modal-form-row">
+          <label class="modal-form-label">Horizon (min)</label>
+          <input id="modal-horizon" class="modal-form-input" type="number" value="30" min="1">
+        </div>
+      </div>
+
+      <!-- Plan output -->
+      <div id="plan-output" class="dim-text" style="font-size:12px">
+        Fill quote fields and click BUILD PLAN to see slices and pre-trade checks.
+      </div>
+    </div><!-- /modal-body -->
+
+    <div class="modal-footer">
+      <button id="cancel-trade-btn" class="btn-cancel">CANCEL</button>
+      <button id="build-plan-btn" class="btn-build">BUILD PLAN</button>
+      <button id="confirm-trade-btn" class="btn-confirm" disabled>BUILD PLAN FIRST</button>
+    </div>
+  </div><!-- /modal -->
+
+</div><!-- /modal-overlay -->
+
+<!-- ─── Toast ───────────────────────────────────────────── -->
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
