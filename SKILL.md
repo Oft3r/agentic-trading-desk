@@ -213,11 +213,21 @@ Loop body (every scan_interval_sec):
 5. Read signals from state/auto_status.json.
 6. For each signal where execute=true:
    a. get_equity_quotes → fresh quote (must be <5s old).
-   b. python3 scripts/execution_plan.py order_input.json → plan.
-   c. If plan.status == "READY FOR REVIEW": review_equity_order (simulation).
-   d. Only if review passes AND config.dry_run is false: place_equity_order.
-   e. Append execution result to state/auto_status.json log.
+   b. python3 scripts/execution_plan.py order_input.json --json > plan.json → plan.
+   c. If plan.status != "READY FOR REVIEW" (e.g., BLOCKED/stale): refetch quote, re-plan; skip if still blocked.
+   d. **Render the proposal + approval form for this signal** and surface it:
+      `python3 render.py proposal card.json --plan plan.json -o state/proposals/<SYM>.html`
+      (score card.json is the auto_engine/score.py output for that ticker.)
+   e. review_equity_order (simulation) — always, even in full auto.
+   f. **Require the user's pasted-back `✅ APPROVE … [token …]` line** for that
+      proposal before proceeding. No paste / a `❌ REJECT` line → skip, log, move on.
+   g. Only if review passes, the token matches, AND config.dry_run is false: place_equity_order.
+   h. Append the proposal path + review/execution result to state/auto_status.json log.
 7. If daily_stats.hard_stopped becomes true: stop the loop.
+
+Per-signal approval keeps the real-time-confirmation guardrail intact in auto
+mode: the loop generates the signals and the proposal cards, but a human still
+approves each order via the form's pasted-back APPROVE line.
 ```
 
 **Hard-coded safeguards (never override):**
