@@ -143,6 +143,13 @@ def run(close: list[float], high: Optional[list[float]] = None,
     closed = [t for t in trades if not t.get("open")]
     bh_ret = close[-1] / close[warmup] - 1.0
     bars = len(strat_ret)
+    # Equity curves (both indexed to 1.0 at the first tested bar) — for the
+    # HTML view layer (render.py backtest). No lookahead; pure replay of rets.
+    strat_equity, eq = [], 1.0
+    for r in strat_ret:
+        eq *= 1 + r
+        strat_equity.append(round(eq, 5))
+    bh_curve = [round(close[warmup + k] / close[warmup], 5) for k in range(bars)]
     return {
         "bars_tested": bars,
         "period": {"start": d(warmup), "end": d(n - 1)},
@@ -150,6 +157,8 @@ def run(close: list[float], high: Optional[list[float]] = None,
                    "atr_stop": use_stop, "stop_mult": stop_mult},
         "metrics": _metrics(strat_ret, closed, exposure_bars, bars),
         "buy_hold_return_pct": round(bh_ret * 100, 2),
+        "equity_curve": strat_equity,
+        "buyhold_equity": bh_curve,
         "trades": closed,
     }
 

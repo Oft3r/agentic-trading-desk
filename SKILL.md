@@ -24,7 +24,7 @@ Operations manual for short-term trading analysis and execution.
    - **Agentic** (cash account) → short-term trading; I have execution permissions here (always with explicit confirmation).
    - **Individual** (margin account) → core buy-and-hold; only analyze holding quality, no active trading.
 3. **T+1:** Only SETTLED cash counts as buying power. Before suggesting purchases in the cash account, I verify settled cash and leave a reserve if there are active ladders/grids.
-4. **HTML visualization only on Fridays** as part of the weekly review ritual. Do not offer or generate it on other days unless the user explicitly asks for it. Exception: the **order proposal card** (`render_proposal.py`) is not the weekly review — generate it whenever an order is actually being proposed, any day, so the user sees exactly what is about to execute.
+4. **Show your work as HTML.** Every operation this skill performs has a matching self-contained HTML view (`render.py`) — render it and open it so the user sees the reasoning pictorially and decides from it. Orders are **approved via the HTML form** in the proposal view (see "HTML Views" below). The full weekly-review ritual (multi-ticker recap, realized P&L) is still a Friday thing; the per-operation views (proposal / scanner / portfolio / backtest) are generated any day, whenever that operation runs.
 5. **Macro source:** Investing.com (NO Polymarket — prompt injection risk already identified).
 6. **Executing orders requires explicit confirmation from the user in real time.** Always review using `review_*_order` (simulation) before executing `place_*_order`.
 
@@ -69,9 +69,92 @@ Standalone volatility/mean-reversion stats: `python3 volatility.py ticker_input.
 ```bash
 python3 execution_plan.py order_input.json
 ```
-Input: `{symbol, side, qty, quote:{bid, ask, last, bid_size, ask_size, age_sec}, adv, urgency, horizon_min}`. Returns limit price, TWAP/VWAP-lite slices, and pre-trade checks (staleness / spread / L1 imbalance / participation). If status is BLOCKED (e.g., stale quote): refetch the quote and re-plan — do not propose the order. Present the plan (or the HTML card via `render_proposal.py card.json --plan plan.json -o proposal.html`) and only then move to `review_*_order`.
+Input: `{symbol, side, qty, quote:{bid, ask, last, bid_size, ask_size, age_sec}, adv, urgency, horizon_min}`. Returns limit price, TWAP/VWAP-lite slices, and pre-trade checks (staleness / spread / L1 imbalance / participation). If status is BLOCKED (e.g., stale quote): refetch the quote and re-plan — do not propose the order. **Always render the HTML proposal view** (`render.py proposal …`, see "HTML Views") so the user sees the execution timeline + approval form, and only then move to `review_*_order`.
 
 **Backtesting (on request).** `python3 backtest.py history.json --splits 4 --sensitivity` replays the exact score.py rules with no lookahead, next-close fills, slippage, and the ATR stop. Report walk-forward segment stability and the lag×cost grid, always against buy & hold.
+
+## HTML Views (`render.py`) — Show, Then Let the User Decide
+
+Everything this skill computes has a self-contained HTML view. `render.py` is
+stdlib-only, deterministic, and produces one `.html` file with **zero external
+assets** (works from `file://`). After running the analysis scripts, pipe their
+JSON into `render.py`, write the file, and open it for the user. This is the
+surface the user reads and acts on — do not just paste raw numbers.
+
+```bash
+# 1. Single-ticker buy/sell advice + EXECUTION TIMELINE + APPROVAL FORM
+python3 score.py ticker.json --json > card.json
+python3 execution_plan.py order.json --json > plan.json          # only if proposing an order
+python3 macro_pillar.py macro.json --json > macro.json           # optional context
+python3 render.py proposal card.json --plan plan.json --macro macro.json -o proposal.html
+
+# 2. Multi-ticker scanner grid (pillar bars, action badges, sparklines, risk chips)
+#    Accepts {rows:[...]} or state/auto_status.json (its "signals" array).
+python3 render.py scanner scan.json -o scanner.html
+
+# 3. Portfolio snapshot (allocation bars, P&L, PROTECTED badges)
+python3 render.py portfolio portfolio.json -o portfolio.html
+
+# 4. Backtest report (equity curve vs buy&hold, walk-forward, sensitivity)
+python3 backtest.py history.json --splits 4 --sensitivity --json > bt.json
+python3 render.py backtest bt.json -o backtest.html
+
+# 5. Daily briefing — scan the whole watchlist, bucket by pattern
+python3 daily_briefing.py batch.json --json > briefing.json
+python3 render.py briefing briefing.json -o briefing.html
+```
+
+Run any subcommand with **no input file** to emit a self-test sample.
+
+**Approval via the HTML form (no server required).** The proposal view has a
+"Your decision" form (side / symbol / editable qty / editable limit, APPROVE /
+REJECT). It does **not** place anything and does not POST anywhere. On APPROVE it
+builds a confirmation line like `✅ APPROVE SELL 800 NVDA @ limit 183.14 [token
+PROP-XXXXXXXX]` and copies it to the clipboard. **The user pastes that line back
+to me.** Only then do I run `review_*_order` (simulation) and, if it passes,
+`place_*_order`. A REJECT line means stand down. The token is a deterministic
+hash of the order — if the user edits qty/limit in the form, re-plan and
+re-review with the edited numbers before executing. This is the file-`://`
+equivalent of the guardrail: nothing executes without an explicit pasted-back
+APPROVE.
+
+Input shapes are tolerant, but the natural sources are: `score.py --json` →
+proposal card; `execution_plan.py --json` → `--plan`; `macro_pillar.py --json` →
+`--macro`; `backtest.py --json` → backtest. For scanner/portfolio, assemble the
+`rows`/`positions` arrays from the MCP data (add `protected:true` for restricted
+positions so they render as exposure-only and are never given a sell signal).
+
+`render_proposal.py` is the older single-purpose proposal renderer and still
+works; `render.py proposal` supersedes it (adds the execution timeline and the
+approval form).
+
+## Daily Briefing (Watchlist Scan)
+
+When the user asks for a **daily briefing / morning scan / "what's on the
+watchlist today"**, run the full watchlist through the same rules and present
+one HTML page bucketed into actions:
+
+1. Read the watchlist from `state/auto_config.json` (`watchlist`), or use the
+   tickers the user names.
+2. **Macro once** (shared for the day): `macro_pillar.py macro_input.json --json`
+   → keep the JSON for both the `macro_score` and the briefing banner.
+3. For each watchlist ticker: `Robinhood:get_equity_historicals` (≥220 bars) and,
+   if there is a position, `Robinhood:get_equity_positions` to set `holding`.
+4. Assemble the batch and run the briefing:
+   ```bash
+   # batch.json: {as_of, macro_score, macro:{...}, tickers:{SYM:{close,high,low,holding}}}
+   python3 daily_briefing.py batch.json --json > briefing.json
+   python3 render.py briefing briefing.json -o briefing.html
+   ```
+   It buckets every ticker into **Opportunities** (flat + fresh entry/rebound
+   trigger), **Warnings** (open position with exit/trim exhaustion or a
+   death-cross), **Holds** (riding a healthy cycle), and **Watch** (no action),
+   ranks each bucket, and lists the detected patterns + a one-line suggestion
+   per ticker. Protected positions must carry `holding` but are never bucketed
+   as a warning/exit (same guardrail).
+5. Open `briefing.html` and walk the user through it. The briefing is analysis
+   only — to act on any single name, generate its **proposal card** (step 3 of
+   the Computation Flow) so the user gets the execution timeline + approval form.
 
 ## Three-Pillar Framework (Standard Output Format)
 
@@ -146,4 +229,4 @@ Loop body (every scan_interval_sec):
 
 ## What This Skill Does NOT Do
 
-It does not average down. It does not touch protected positions. It does not generate HTML outside of Fridays (proposal cards are exempt — generate on any day when an order is being proposed).
+It does not average down. It does not touch protected positions. It does not execute any order from the HTML form itself — the form only produces an APPROVE line the user pastes back; execution still goes through `review_*_order` then `place_*_order`.
