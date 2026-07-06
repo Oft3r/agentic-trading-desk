@@ -136,11 +136,31 @@ one HTML page bucketed into actions:
 
 1. Read the watchlist from `state/auto_config.json` (`watchlist`), or use the
    tickers the user names.
-2. **Macro once** (shared for the day): `macro_pillar.py macro_input.json --json`
-   → keep the JSON for both the `macro_score` and the briefing banner.
-3. For each watchlist ticker: `Robinhood:get_equity_historicals` (≥220 bars) and,
-   if there is a position, `Robinhood:get_equity_positions` to set `holding`.
-4. Assemble the batch and run the briefing:
+2. **Fetch bars token-safely.** `get_equity_historicals` for the watchlist +
+   the 8 macro ETFs (SPY,RSP,IWM,HYG,LQD,TLT,XLY,XLP) at daily interval is
+   ~440k chars — over the token cap. Request **≤4 symbols per call**; each
+   oversized response is written to a tool-results file on disk (do NOT read
+   those blobs back into context). Then extract closes with one script:
+   ```bash
+   # holdings.json: {SYM: true/false} — set from state/data/*.json or a
+   # user-supplied account_number via get_equity_positions (never default it).
+   python3 hist_to_batch.py \
+     --hist <saved_hist_file_1> <saved_hist_file_2> \
+     --watch NVDA,AAPL,TSLA,MSFT \
+     --as-of 2026-07-06T13:30:00Z --holdings holdings.json \
+     --macro-out macro_input.json --batch-out batch.json
+   ```
+   This writes `macro_input.json` (macro ETF series) and `batch.json`
+   (watchlist OHLC + holding) — small, deterministic, ~35ms even from the
+   two big files.
+3. **Macro once** (shared for the day), then inject its score into the batch:
+   ```bash
+   python3 macro_pillar.py macro_input.json --json > macro.json
+   # merge macro.json -> batch.json as {"macro_score": pillar_score, "macro": {...}}
+   ```
+   `macro_pillar` caps the regime window (`regime.classify max_bars=750`), so it
+   stays <50ms regardless of how much history you fetched — no threading needed.
+4. Run the briefing:
    ```bash
    # batch.json: {as_of, macro_score, macro:{...}, tickers:{SYM:{close,high,low,holding}}}
    python3 daily_briefing.py batch.json --json > briefing.json

@@ -149,14 +149,22 @@ def hmm_smooth(r: list[float], gmm: dict, p_stay: float = 0.97) -> list[float]:
 # --------------------------------------------------------------------------
 
 def classify(close: list[float], min_bars: int = 120,
-             p_stay: float = 0.97, threshold: float = 0.6) -> Optional[dict]:
+             p_stay: float = 0.97, threshold: float = 0.6,
+             max_bars: int = 750) -> Optional[dict]:
     """
     Full pipeline: returns -> GMM fit -> HMM smoothing -> label.
     `threshold`: smoothed P(turbulent) above which the state flips.
+    `max_bars`: cap the return window (default ~3y daily). This is a read of
+    the *current* regime, so only the recent window matters; the cap keeps EM
+    cost bounded (fit_gmm2 is O(n*iters) and dominates runtime) without
+    changing output on normal inputs (≤750 returns pass through untouched).
+    Set max_bars=0 to disable and fit the full series.
     """
     r = log_returns(close)
     if len(r) < min_bars:
         return None
+    if max_bars and len(r) > max_bars:
+        r = r[-max_bars:]
     gmm = fit_gmm2(r)
     post = hmm_smooth(r, gmm, p_stay)
     p_turb = post[-1]
