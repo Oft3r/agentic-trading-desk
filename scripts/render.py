@@ -35,6 +35,7 @@ import hashlib
 import html
 import json
 import math
+import re
 import sys
 from typing import Optional, Sequence
 
@@ -201,7 +202,7 @@ def execution_timeline(plan: dict) -> str:
         y = pad + plot_h - bh
         bars.append(
             f'<rect x="{x - bw/2:.1f}" y="{y:.1f}" width="{bw:.1f}" height="{bh:.1f}" '
-            f'rx="2" fill="var(--blue)" opacity="0.85"><title>slice {sl.get("slice","")}: '
+            f'rx="2" fill="var(--blue)" opacity="0.85"><title>slice {E(str(sl.get("slice","")))}: '
             f'{int(q)} @ {_num(sl.get("limit")) or 0:.2f} at t+{at:g}m</title></rect>'
             f'<text x="{x:.1f}" y="{y - 4:.1f}" fill="var(--dim)" font-size="10" '
             f'text-anchor="middle">{int(q)}</text>'
@@ -253,7 +254,7 @@ def build_proposal(card: dict, plan: Optional[dict] = None,
     action = d.get("action", "OBSERVE")
     sym = card.get("symbol") or "?"
     B = [f"<h1>{E(sym)}</h1>",
-         f'<div class="sub">{card.get("n_bars","?")} bars · pillar total '
+         f'<div class="sub">{E(str(card.get("n_bars","?")))} bars · pillar total '
          f'<b>{card.get("pillar_total",0):+d}</b> / ±6</div>',
          f'<div class="banner {_cls(action)}">► {E(action)}'
          f'<small>{E(d.get("rationale",""))} {E(d.get("framing",""))}</small></div>']
@@ -323,7 +324,7 @@ def build_proposal(card: dict, plan: Optional[dict] = None,
         col = "var(--red)" if st == "BLOCKED" else "var(--green)"
         B.append('<div class="card"><h2>Execution Plan</h2>')
         B.append(f'<div style="font-size:16px;font-weight:700;margin-bottom:8px">'
-                 f'{E(str(plan.get("side","")).upper())} {plan.get("qty","")} {E(plan.get("symbol",""))}'
+                 f'{E(str(plan.get("side","")).upper())} {E(str(plan.get("qty","")))} {E(plan.get("symbol",""))}'
                  f' — <span style="color:{col}">{E(st)}</span></div>')
         q = plan.get("quote", {})
         B.append(f'<div class="kv"><span class="k">Quote</span><span>'
@@ -331,7 +332,7 @@ def build_proposal(card: dict, plan: Optional[dict] = None,
                  f'{q.get("spread_bps","?")} bps · age {_num(q.get("age_sec"),0):.1f}s</span></div>')
         pr = plan.get("pricing", {})
         B.append(f'<div class="kv"><span class="k">Limit</span><span>{_num(pr.get("limit"),0):.2f} · {E(pr.get("style",""))}</span></div>')
-        B.append(f'<div class="kv"><span class="k">Est. all-in cost</span><span>≤{plan.get("est_all_in_cost_bps","?")} bps</span></div>')
+        B.append(f'<div class="kv"><span class="k">Est. all-in cost</span><span>≤{E(str(plan.get("est_all_in_cost_bps","?")))} bps</span></div>')
         B.append('<table style="margin-top:10px"><tr><th>Check</th><th>Status</th><th>Detail</th></tr>')
         for c in plan.get("checks", []):
             B.append(f'<tr><td>{E(c.get("name",""))}</td>'
@@ -341,18 +342,22 @@ def build_proposal(card: dict, plan: Optional[dict] = None,
 
         # ── Approval form (works from file://) ──
         if st != "BLOCKED":
-            side = str(plan.get("side", "")).upper()
-            qty = plan.get("qty", "")
+            # Sanitize identity fields to a fixed charset so the pasted-back
+            # confirmation line cannot be hijacked (no newlines / injected
+            # order text) via a tampered symbol/side. qty/limit are numeric.
+            safe_side = re.sub(r"[^A-Z]", "", str(plan.get("side", "")).upper()) or "?"
+            safe_sym = re.sub(r"[^A-Z0-9.\-]", "", str(sym).upper()) or "?"
             limit = _num(pr.get("limit"), 0)
-            tok = order_token(sym, side, qty, limit)
+            qty = plan.get("qty", "")
+            tok = order_token(safe_sym, safe_side, qty, limit)
             approval = f'''
 <div class="approve">
   <h2 style="color:var(--green)">Your decision</h2>
   <div class="row">
-    <div><label>Side</label><input id="side" value="{E(side)}" readonly></div>
-    <div><label>Symbol</label><input id="sym" value="{E(sym)}" readonly></div>
-    <div><label>Qty</label><input id="qty" type="number" value="{E(str(qty))}"></div>
-    <div><label>Limit</label><input id="limit" type="number" step="0.01" value="{limit:.2f}"></div>
+    <div><label>Side</label><input id="side" value="{E(safe_side)}" readonly></div>
+    <div><label>Symbol</label><input id="sym" value="{E(safe_sym)}" readonly></div>
+    <div><label>Qty</label><input id="qty" type="number" min="0" step="1" value="{E(str(qty))}"></div>
+    <div><label>Limit</label><input id="limit" type="number" min="0" step="0.01" value="{limit:.2f}"></div>
   </div>
   <div class="btnrow">
     <button class="bapprove" id="btnA">✓ APPROVE</button>
@@ -366,15 +371,16 @@ def build_proposal(card: dict, plan: Optional[dict] = None,
 </div>
 <script>
 (function(){{
-  var TOK={json.dumps(tok)};
+  // Identity fields are fixed, server-sanitized constants — never read the
+  // raw DOM value for side/symbol (readonly). qty/limit are coerced numeric.
+  var TOK={json.dumps(tok)}, SIDE={json.dumps(safe_side)}, SYM={json.dumps(safe_sym)};
   function emit(decision){{
-    var side=document.getElementById('side').value;
-    var sym=document.getElementById('sym').value;
-    var qty=document.getElementById('qty').value;
-    var lim=document.getElementById('limit').value;
+    var qty=Math.max(0,Math.floor(Number(document.getElementById('qty').value)||0));
+    var ln=Number(document.getElementById('limit').value);
+    var lim=(isFinite(ln)&&ln>=0)?ln.toFixed(2):'0.00';
     var line = decision==='APPROVE'
-      ? ('✅ APPROVE '+side+' '+qty+' '+sym+' @ limit '+lim+' [token '+TOK+']')
-      : ('❌ REJECT '+sym+' [token '+TOK+']');
+      ? ('✅ APPROVE '+SIDE+' '+qty+' '+SYM+' @ limit '+lim+' [token '+TOK+']')
+      : ('❌ REJECT '+SYM+' [token '+TOK+']');
     var o=document.getElementById('out');
     document.getElementById('outline').textContent=line;
     o.classList.add('show');
@@ -473,7 +479,7 @@ def build_portfolio(data: dict) -> str:
             f'<tr><td>{name_cell}</td>'
             f'<td><div class="abar"><span style="width:{max(0,min(100,weight)):.1f}%"></span></div>'
             f'<span style="font-size:11px;color:var(--dim)">{weight:.1f}%</span></td>'
-            f'<td class="r">{p.get("qty","")}</td>'
+            f'<td class="r">{E(str(p.get("qty","")))}</td>'
             f'<td class="r">{_num(p.get("avg_cost"),0):.2f}</td>'
             f'<td class="r">{_num(p.get("last"),0):.2f}</td>'
             f'<td class="r">${_num(p.get("mkt_value"),0):,.0f}</td>'
@@ -543,7 +549,7 @@ def build_briefing(b: dict) -> str:
     ps = macro.get("pillar_score", 0)
     mcls = "enter" if ps > 0 else "exit" if ps < 0 else "wait"
     sr = macro.get("stat_regime") or {}
-    srtxt = (f' · vol regime {sr.get("state","").upper()} (p_turb {sr.get("p_turbulent",0):.2f})'
+    srtxt = (f' · vol regime {E(str(sr.get("state",""))).upper()} (p_turb {_num(sr.get("p_turbulent"),0):.2f})'
              if sr else "")
     B.append(f'<div class="banner {mcls}">Market — macro {ps:+d} {E(reg)}'
              f'<small>Cross-asset regime sets today\'s Macro-Sentiment pillar for every ticker{E(srtxt)}</small></div>')
@@ -663,10 +669,10 @@ def build_backtest(bt: dict) -> str:
         for g in grid:
             ret = _num(g.get("total_return_pct"), 0)
             rc = "pos" if ret >= 0 else "neg"
-            B.append(f'<tr><td>{g.get("lag","")}</td><td>{g.get("cost_bps","")}</td>'
+            B.append(f'<tr><td>{E(str(g.get("lag","")))}</td><td>{E(str(g.get("cost_bps","")))}</td>'
                      f'<td class="r {rc}">{ret:+.1f}%</td>'
-                     f'<td class="r">{g.get("sharpe","—")}</td>'
-                     f'<td class="r">{g.get("max_drawdown_pct","—")}%</td></tr>')
+                     f'<td class="r">{E(str(g.get("sharpe","—")))}</td>'
+                     f'<td class="r">{E(str(g.get("max_drawdown_pct","—")))}%</td></tr>')
         B.append('</table></div>')
     B.append('<div class="footer">Past performance under exact score.py rules · not a forecast.</div>')
     return _page("Backtest", "".join(B))
