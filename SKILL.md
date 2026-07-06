@@ -245,6 +245,15 @@ today's daily budget** (use the paced default if there's no reply), run
 still waits on the user's pasted APPROVE per order — never autonomous (same
 guardrail as Auto Pilot Mode).
 
+**Track the daily budget used.** Each run appends one entry to
+`state/agentic_budget_log.json` (a JSON list) from the book's `daily`/`cycle`
+blocks: `{date, cycle_index, day_in_cycle, daily_budget_effective, source
+(input|paced), strong_signal, spilled, deploy_today_planned,
+monthly_remaining, invested_so_far}`, plus `deploy_today_actual` (sum of filled
+order notionals; 0 for skipped/rejected) after approvals. This ledger is the
+running record of daily-budget consumption across the 30-day cycle and feeds the
+next day's paced default via `invested_so_far` → `--held`.
+
 ## Three-Pillar Framework (Standard Output Format)
 
 Each pillar ranges from **-2 to +2**:
