@@ -102,6 +102,12 @@ python3 render.py backtest bt.json -o backtest.html
 # 5. Daily briefing — scan the whole watchlist, bucket by pattern
 python3 daily_briefing.py batch.json --json > briefing.json
 python3 render.py briefing briefing.json -o briefing.html
+
+# 6. 30-day budget allocation — score → paced % of the Agentic account
+#    (--held from the Agentic account only; broad-index ETFs excluded)
+python3 allocate.py briefing.json --cash 500 --cycle-start <anchor> --as-of <today> \
+  --held agentic_positions.json --json > book.json
+python3 render.py allocate book.json -o agentic_book.html
 ```
 
 Run any subcommand with **no input file** to emit a self-test sample.
@@ -175,6 +181,55 @@ one HTML page bucketed into actions:
 5. Open `briefing.html` and walk the user through it. The briefing is analysis
    only — to act on any single name, generate its **proposal card** (step 3 of
    the Computation Flow) so the user gets the execution timeline + approval form.
+
+## 30-Day Budget Allocation (Agentic Rotation)
+
+Turns the briefing scores into a **paced buy/sell plan** for the Agentic (cash)
+account. The account runs on a **30-day budget cycle**: the budget (default the
+account's settled cash, e.g. $500) funds one 30-day window, purchases are
+**paced across the cycle** rather than lump-sum, and at day 30 the budget
+**refreshes** — re-score, rebuild targets, rotate. This is `allocate.py`.
+
+**Inputs & guardrails (do not skip):**
+- **`holding` must come from the Agentic account (692801525)**, never the margin
+  account and never defaulted from `get_accounts`. Pull `get_equity_positions`
+  for the Agentic account, pass each position's market value to `--held`
+  (`{SYM: current_market_value}`), and set the same symbols `holding=true` in the
+  briefing batch so they get exit/rotate signals.
+- **Broad-index ETFs are excluded by default** (VOO/SPY/VTI/IVV/QQQ/… — see
+  `_BROAD_ETFS`) so the rotation trades single names. `--allow-etfs` to override.
+- **Budget = settled (T+1) cash only.** Confirm the buying power with the user or
+  `get_accounts` for the Agentic account before sizing.
+
+**Flow (extends the briefing):**
+```bash
+# 1. Briefing already produced briefing.json (step 4 above), with Agentic
+#    holdings marked. Then size the 30-day book:
+python3 allocate.py briefing.json \
+  --cash 500 --cycle-days 30 --cycle-start <cycle-anchor> --as-of <today> \
+  --held agentic_positions.json --per-name-cap 0.25 --json > book.json
+# 2. Render the read-only overview (targets, today's paced tranche, sells):
+python3 render.py allocate book.json -o ~/Downloads/agentic_book.html
+```
+- Score = `pillar_total` (−6..+6). Weight ∝ score, capped per name at
+  `min(per_name_cap, vol_target_fraction)`, excess redistributed, × `--deploy`.
+- `buy_today_dollars = (target_dollars − current_value) / days_remaining` — the
+  self-correcting DCA tranche. Held names that fall out of eligibility →
+  **SELL → 0**.
+- `--cycle-start` is the fixed anchor; `cycle_index`/`day_in_cycle`/`refresh_today`
+  are derived from `--as-of`. Keep the same anchor across the loop so the cycle
+  advances correctly (day 30 flips `refresh_today` and starts cycle #1).
+
+**Execution — the allocate view is OVERVIEW ONLY.** To act on any line, generate
+its **own proposal card** (`render.py proposal … --plan plan.json`), run
+`review_equity_order` (simulation) first, require the user's pasted-back
+`✅ APPROVE … [token …]`, then `place_equity_order`. One card per BUY and per
+SELL. Nothing places from the overview page.
+
+**Daily loop (7:04am job):** after the shared briefing, run `allocate.py` with the
+persisted `--cycle-start`, render the book to `~/Downloads`, and generate a
+proposal card per non-zero tranche. Placement still waits on the user's pasted
+APPROVE per order — never autonomous (same guardrail as Auto Pilot Mode).
 
 ## Three-Pillar Framework (Standard Output Format)
 

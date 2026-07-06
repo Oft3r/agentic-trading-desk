@@ -397,6 +397,75 @@ def build_proposal(card: dict, plan: Optional[dict] = None,
     return _page(f"{sym} — proposal", "".join(B))
 
 
+# ── allocate (30-day budget book) ────────────────────────────────────────────
+
+def build_allocate(a: dict) -> str:
+    """Read-only dashboard for allocate.py's 30-day budget book. No approval
+    form here — each BUY/SELL gets its own proposal card (review_*_order first)."""
+    acct, cyc, s = a.get("account", {}), a.get("cycle", {}), a.get("summary", {})
+    prm = a.get("params", {})
+    budget = _num(acct.get("budget"), 0) or 0
+    B = [f'<h1>Agentic — 30-day budget book</h1>',
+         f'<div class="sub">{E(a.get("as_of",""))} · ${budget:.0f} budget · '
+         f'cycle #{cyc.get("cycle_index",0)} · day {cyc.get("day_in_cycle","?")}/'
+         f'{cyc.get("cycle_days","?")} · {cyc.get("days_remaining","?")} days left'
+         + ('  ·  <b>REFRESH DAY</b>' if cyc.get("refresh_today") else '') + '</div>']
+
+    banner = (f'Deploy target {s.get("deployed_target_pct",0):.0f}% · invested '
+              f'${s.get("invested_so_far",0):.2f} · <b>buy today ${s.get("buy_today_dollars",0):.2f}</b>'
+              f' · {s.get("funded",0)} funded · {s.get("sells",0)} to sell')
+    B.append(f'<div class="banner hold">► 30-DAY PACING<small>{banner}'
+             + (f' · cycle {E(cyc.get("cycle_start",""))} → {E(cyc.get("cycle_end",""))}'
+                if cyc.get("cycle_start") else '') + '</small></div>')
+
+    # Buys table with target-weight allocation bars + paced tranche
+    B.append('<div class="card"><h2>Targets & today\'s tranche</h2>')
+    B.append('<table><tr><th>Symbol</th><th>Score</th><th>Target</th>'
+             '<th class="r">Target $</th><th class="r">Held $</th>'
+             '<th class="r">Buy today $</th><th class="r">Shares</th><th>Action</th></tr>')
+    for b in a.get("buys", []):
+        w = _num(b.get("target_weight_pct"), 0) or 0
+        sc = int(_num(b.get("score"), 0) or 0)
+        scc = "pos" if sc > 0 else "neg" if sc < 0 else "zero"
+        B.append(
+            f'<tr><td><b>{E(b.get("symbol",""))}</b></td>'
+            f'<td class="{scc}">{sc:+d}</td>'
+            f'<td><div class="abar"><span style="width:{min(w,100):.1f}%"></span></div>'
+            f'<span class="hint">{w:.1f}%</span></td>'
+            f'<td class="r">{_num(b.get("target_dollars"),0):.2f}</td>'
+            f'<td class="r">{_num(b.get("current_value"),0):.2f}</td>'
+            f'<td class="r"><b>{_num(b.get("buy_today_dollars"),0):.2f}</b></td>'
+            f'<td class="r">{_num(b.get("buy_today_shares"),0):.4f}</td>'
+            f'<td><span class="badge b-enter">{E(b.get("side",""))}</span> {E(b.get("action",""))}</td></tr>')
+    B.append('</table></div>')
+
+    sells = a.get("sells", [])
+    if sells:
+        B.append('<div class="card"><h2>Rotate out (sell to cash)</h2>')
+        B.append('<table><tr><th>Symbol</th><th>Score</th><th class="r">Held $</th>'
+                 '<th class="r">Shares</th><th>Reason</th></tr>')
+        for x in sells:
+            sh = x.get("sell_today_shares")
+            sh_cell = f'{sh:.4f}' if sh is not None else '—'
+            B.append(
+                f'<tr><td><b>{E(x.get("symbol",""))}</b></td>'
+                f'<td class="neg">{int(_num(x.get("score"),0) or 0):+d}</td>'
+                f'<td class="r">{_num(x.get("current_value"),0):.2f}</td>'
+                f'<td class="r">{sh_cell}</td>'
+                f'<td>{E(x.get("reason",""))}</td></tr>')
+        B.append('</table></div>')
+
+    if prm.get("excluded_etfs"):
+        B.append(f'<div class="card"><h2>Excluded (broad-index ETFs)</h2>'
+                 f'<div class="sub" style="margin:0">{E(", ".join(prm["excluded_etfs"]))} '
+                 f'— single-name rotation only (per-name cap {prm.get("per_name_cap_pct",0):.0f}%)</div></div>')
+
+    B.append('<div class="confirm">⛔ OVERVIEW ONLY — each BUY/SELL needs its own '
+             'proposal card: review_equity_order (simulation) → your APPROVE → place_equity_order.</div>')
+    B.append('<div class="footer">agentic-trading-desk · 30-day paced budget · human-approved execution</div>')
+    return _page("Agentic — 30-day budget book", "".join(B))
+
+
 # ── scanner ─────────────────────────────────────────────────────────────────
 
 def build_scanner(data: dict) -> str:
@@ -789,6 +858,10 @@ def main() -> int:
     sbr.add_argument("data", nargs="?", help="daily_briefing.py --json output (omit for self-test)")
     sbr.add_argument("-o", "--out", default="briefing.html")
 
+    sal = sub.add_parser("allocate", help="30-day budget book (allocate.py output)")
+    sal.add_argument("data", nargs="?", help="allocate.py --json output (omit for self-test)")
+    sal.add_argument("-o", "--out", default="allocate.html")
+
     args = ap.parse_args()
 
     if args.cmd == "proposal":
@@ -809,6 +882,20 @@ def main() -> int:
             import daily_briefing as DB
             brief = DB.build(DB._selftest_batch())
         htmlout = build_briefing(brief)
+    elif args.cmd == "allocate":
+        if args.data:
+            book = _read(args.data)
+        else:
+            import allocate as AL
+            book = AL.allocate({
+                "as_of": "2026-07-06", "rows": [
+                    {"symbol": "XOM", "action": "RE-ENTRY (new cycle)", "pillar_total": 5, "holding": False, "close": 137.09, "size_fraction": 1.0},
+                    {"symbol": "BA", "action": "RE-ENTRY (new cycle)", "pillar_total": 4, "holding": False, "close": 226.49, "size_fraction": 0.45},
+                    {"symbol": "NOW", "action": "TACTICAL BOUNCE", "pillar_total": 3, "holding": False, "close": 902.0, "size_fraction": 0.5},
+                    {"symbol": "NVDA", "action": "STAY OUT / AVOID", "pillar_total": -1, "holding": True, "close": 194.83, "size_fraction": 0.44},
+                ]}, cash=500, cycle_start="2026-07-06", as_of="2026-07-06",
+                held={"NVDA": 40.0})
+        htmlout = build_allocate(book)
     else:
         ap.error("unknown command")
         return 2
