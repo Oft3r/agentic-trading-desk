@@ -403,16 +403,32 @@ def build_allocate(a: dict) -> str:
     """Read-only dashboard for allocate.py's 30-day budget book. No approval
     form here — each BUY/SELL gets its own proposal card (review_*_order first)."""
     acct, cyc, s = a.get("account", {}), a.get("cycle", {}), a.get("summary", {})
-    prm = a.get("params", {})
+    prm, dly = a.get("params", {}), a.get("daily", {})
     budget = _num(acct.get("budget"), 0) or 0
     B = [f'<h1>Agentic — 30-day budget book</h1>',
-         f'<div class="sub">{E(a.get("as_of",""))} · ${budget:.0f} budget · '
+         f'<div class="sub">{E(a.get("as_of",""))} · ${budget:.0f} monthly budget · '
          f'cycle #{cyc.get("cycle_index",0)} · day {cyc.get("day_in_cycle","?")}/'
          f'{cyc.get("cycle_days","?")} · {cyc.get("days_remaining","?")} days left'
          + ('  ·  <b>REFRESH DAY</b>' if cyc.get("refresh_today") else '') + '</div>']
 
+    # Daily budget + spill line
+    if dly:
+        src = "your input" if dly.get("input_budget") is not None else "paced"
+        spill = ""
+        if dly.get("strong_signal") and _num(dly.get("spilled"), 0):
+            spill = (f' · <b style="color:var(--amber)">+${_num(dly.get("spilled"),0):.2f} SPILL</b>'
+                     f' (strong: top score {int(_num(dly.get("top_score"),0)):+d}'
+                     f'≥{int(_num(dly.get("spill_score"),0)):+d})')
+        B.append(f'<div class="card"><h2>Today\'s budget</h2>'
+                 f'<div class="kv"><span class="k">Daily budget ({E(src)})</span>'
+                 f'<span>${_num(dly.get("effective_budget"),0):.2f}</span></div>'
+                 f'<div class="kv"><span class="k">Monthly remaining</span>'
+                 f'<span>${_num(dly.get("monthly_remaining"),0):.2f}</span></div>'
+                 f'<div class="kv"><span class="k">Deploy today</span>'
+                 f'<span><b>${_num(dly.get("deploy_today"),0):.2f}</b>{spill}</span></div></div>')
+
     banner = (f'Deploy target {s.get("deployed_target_pct",0):.0f}% · invested '
-              f'${s.get("invested_so_far",0):.2f} · <b>buy today ${s.get("buy_today_dollars",0):.2f}</b>'
+              f'${s.get("invested_so_far",0):.2f} · <b>deploy today ${s.get("buy_today_dollars",0):.2f}</b>'
               f' · {s.get("funded",0)} funded · {s.get("sells",0)} to sell')
     B.append(f'<div class="banner hold">► 30-DAY PACING<small>{banner}'
              + (f' · cycle {E(cyc.get("cycle_start",""))} → {E(cyc.get("cycle_end",""))}'

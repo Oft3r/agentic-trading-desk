@@ -100,7 +100,9 @@ def allocate(briefing: dict, cash: float = 500.0, deploy: float = 1.0,
              per_name_cap: float = 0.25, min_score: float = 0.0,
              cycle_days: int = 30, cycle_start: str | None = None,
              as_of: str | None = None, held: dict | None = None,
-             allow_etfs: bool = False, exclude: set | None = None) -> dict:
+             allow_etfs: bool = False, exclude: set | None = None,
+             daily_budget: float | None = None, spill_score: float = 4.0,
+             spill_mult: float = 2.0) -> dict:
     rows = briefing.get("rows") or []
     as_of = as_of or briefing.get("as_of") or ""
     cycle_start = cycle_start or as_of
@@ -152,17 +154,61 @@ def allocate(briefing: dict, cash: float = 500.0, deploy: float = 1.0,
         for s in newly:
             del active[s]
 
-    # 3. dollarize target + pace today's tranche across days_remaining
+    # 3. targets, then a DAILY budget (slice of the month) with spill-over
+    #    on strong signals.
+    tgt = {}                              # sym -> (weight, target$, held$, gap$)
+    for c in cand:
+        sym = c["symbol"]
+        w = weights[sym] * deploy
+        target = round(cash * w, 2)
+        cur = held.get(sym, 0.0)
+        tgt[sym] = (w, target, cur, max(target - cur, 0.0))
+
+    invested = round(sum(t[2] for t in tgt.values()), 2)   # held toward funded
+    monthly_remaining = max(round(cash - invested, 2), 0.0)
+    total_gap = round(sum(t[3] for t in tgt.values()), 2)
+    paced_daily = round(monthly_remaining / days_left, 2)  # even pacing default
+
+    # Daily budget: user input, else the paced slice of the monthly pool.
+    base_daily = paced_daily if daily_budget is None else max(daily_budget, 0.0)
+    # Strong-signal day → allow spending up to spill_mult × the daily budget,
+    # pulling forward from the monthly pool (the "spill"). Concentrated on the
+    # high-score names because the fill below is score-weighted.
+    top_score = max((c["score"] for c in cand), default=0.0)
+    strong = top_score >= spill_score and total_gap > base_daily
+    deploy_today = base_daily * (spill_mult if strong else 1.0)
+    deploy_today = round(min(deploy_today, monthly_remaining, total_gap), 2)
+
+    # Score-weighted fill of deploy_today, each name capped at its gap; leftover
+    # (names whose gap < their share) redistributes to names with room.
+    alloc = {s: 0.0 for s in tgt}
+    for _ in range(12):
+        placed = round(sum(alloc.values()), 6)
+        pool = deploy_today - placed
+        if pool <= 1e-6:
+            break
+        open_names = [s for s in tgt if (tgt[s][3] - alloc[s]) > 1e-6]
+        wsum = sum(weights[s] for s in open_names)
+        if not open_names or wsum <= 0:
+            break
+        progressed = False
+        for s in open_names:
+            room = tgt[s][3] - alloc[s]
+            take = min(pool * weights[s] / wsum, room)
+            if take > 1e-9:
+                alloc[s] += take
+                progressed = True
+        if not progressed:
+            break
+
     book = []
     for c in cand:
-        w = weights[c["symbol"]] * deploy
-        target = round(cash * w, 2)
-        cur = held.get(c["symbol"], 0.0)
-        gap = max(target - cur, 0.0)
-        today = round(gap / days_left, 2)
+        sym = c["symbol"]
+        w, target, cur, gap = tgt[sym]
+        today = round(alloc[sym], 2)
         today_sh = round(today / c["close"], 6) if c["close"] > 0 else 0.0
         book.append({
-            "symbol": c["symbol"], "score": c["score"], "action": c["action"],
+            "symbol": sym, "score": c["score"], "action": c["action"],
             "holding": c["holding"], "close": c["close"],
             "target_weight_pct": round(w * 100, 2), "target_dollars": target,
             "current_value": round(cur, 2), "gap_to_target": round(gap, 2),
@@ -186,13 +232,18 @@ def allocate(briefing: dict, cash: float = 500.0, deploy: float = 1.0,
             })
 
     deployed_pct = round(sum(b["target_weight_pct"] for b in book), 2)
-    invested = round(sum(b["current_value"] for b in book), 2)
     buy_today = round(sum(b["buy_today_dollars"] for b in book), 2)
     return {
         "as_of": as_of,
         "account": {"name": "Agentic (cash)", "budget": cash,
                     "deploy_target_pct": round(deploy * 100, 2)},
         "cycle": cyc,
+        "daily": {"input_budget": daily_budget, "paced_default": paced_daily,
+                  "monthly_remaining": monthly_remaining, "effective_budget": round(base_daily, 2),
+                  "strong_signal": strong, "top_score": top_score,
+                  "spill_score": spill_score, "spill_mult": spill_mult,
+                  "deploy_today": deploy_today,
+                  "spilled": round(max(deploy_today - base_daily, 0.0), 2)},
         "params": {"per_name_cap_pct": round(per_name_cap * 100, 2),
                    "min_score": min_score, "allow_etfs": allow_etfs,
                    "excluded_etfs": sorted(excluded)},
@@ -204,14 +255,19 @@ def allocate(briefing: dict, cash: float = 500.0, deploy: float = 1.0,
 
 
 def _print(a: dict) -> None:
-    c, s = a["cycle"], a["summary"]
+    c, s, d = a["cycle"], a["summary"], a["daily"]
     print(f"Agentic ${a['account']['budget']:.0f} budget · 30-day cycle #{c['cycle_index']} "
           f"day {c['day_in_cycle']}/{c['cycle_days']} · {c['days_remaining']} days left"
           f"{'  [REFRESH DAY]' if c['refresh_today'] else ''}")
     if c["cycle_start"]:
         print(f"cycle {c['cycle_start']} → {c['cycle_end']}")
+    src = "input" if d["input_budget"] is not None else "paced"
+    spill = f" +${d['spilled']:.2f} SPILL (strong: top score {d['top_score']:+.0f}≥{d['spill_score']:+.0f})" \
+        if d["strong_signal"] and d["spilled"] > 0 else ""
+    print(f"daily budget ${d['effective_budget']:.2f} ({src}) · monthly left "
+          f"${d['monthly_remaining']:.2f} · DEPLOY TODAY ${d['deploy_today']:.2f}{spill}")
     print(f"funded {s['funded']} · target {s['deployed_target_pct']:.1f}% · invested "
-          f"${s['invested_so_far']:.2f} · BUY TODAY ${s['buy_today_dollars']:.2f} · sells {s['sells']}")
+          f"${s['invested_so_far']:.2f} · sells {s['sells']}")
     if a["params"]["excluded_etfs"]:
         print(f"excluded ETFs: {', '.join(a['params']['excluded_etfs'])}")
     print(f"\n{'SYM':6} {'SCORE':>5} {'TARGET%':>7} {'TARGET$':>8} {'HELD$':>7} "
@@ -235,6 +291,12 @@ def main() -> int:
     ap.add_argument("--deploy", type=float, default=1.0, help="fraction of budget to deploy (0-1)")
     ap.add_argument("--per-name-cap", type=float, default=0.25, help="max weight per name (0-1)")
     ap.add_argument("--min-score", type=float, default=0.0, help="minimum pillar_total to fund")
+    ap.add_argument("--daily-budget", type=float,
+                    help="$ to deploy today (default: monthly_remaining / days_left)")
+    ap.add_argument("--spill-score", type=float, default=4.0,
+                    help="funded score at/above which today is a STRONG day (allows spill)")
+    ap.add_argument("--spill-mult", type=float, default=2.0,
+                    help="on a strong day, deploy up to this × the daily budget (from the monthly pool)")
     ap.add_argument("--cycle-days", type=int, default=30, help="budget cycle length in days")
     ap.add_argument("--cycle-start", help="YYYY-MM-DD anchor for the cycle (default: as-of)")
     ap.add_argument("--as-of", help="YYYY-MM-DD today (default: briefing as_of)")
@@ -268,7 +330,8 @@ def main() -> int:
                  per_name_cap=args.per_name_cap, min_score=args.min_score,
                  cycle_days=args.cycle_days, cycle_start=args.cycle_start,
                  as_of=args.as_of, held=held, allow_etfs=args.allow_etfs,
-                 exclude=exclude)
+                 exclude=exclude, daily_budget=args.daily_budget,
+                 spill_score=args.spill_score, spill_mult=args.spill_mult)
     if args.out:
         with open(args.out, "w") as f:
             json.dump(a, f, indent=2)
