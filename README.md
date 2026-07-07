@@ -73,7 +73,7 @@ Calculated by the [scripts/macro_pillar.py](scripts/macro_pillar.py) cross-asset
 *   **Asset Preference**: SPY/TLT ratio (equities vs. bonds).
 *   **Sector Rotation**: XLY/XLP ratio (cyclical vs. defensive sectors).
 *   **Inflationary Correlation**: Rolling SPY-TLT correlation.
-*   **Statistical Vol Regime** ([scripts/regime.py](scripts/regime.py)): a 2-state Gaussian Mixture is fitted on SPY daily log returns by EM (deterministic quantile initialization — no RNG), then smoothed with a sticky 2-state HMM (forward-backward, p_stay = 0.97) so the regime only flips on persistent evidence. A high-confidence *turbulent* state caps the macro pillar at 0 even when the (slower) ratio trends still look benign.
+*   **Statistical Vol Regime** ([scripts/regime.py](scripts/regime.py)): a 2-state Gaussian Mixture is fitted on SPY daily log returns by EM (deterministic quantile initialization — no RNG), then smoothed with a sticky 2-state HMM (forward-backward, p_stay = 0.97) so the regime only flips on persistent evidence. A high-confidence *turbulent* state caps the macro pillar at 0 even when the (slower) ratio trends still look benign. Because the sticky HMM needs *persistent* evidence to flip — precisely the wrong lag on the first day of a crash — a **vol-acceleration override** runs in parallel: if the latest SPY return is ≤ −2.5σ of its trailing distribution (`--shock-sigma`), the effective regime is forced to *turbulent* immediately and the pillar cap fires that day, while the raw HMM verdict (`hmm_state`, `p_turbulent`) is preserved for transparency (`state_source` says which path set the label).
 
 ---
 
