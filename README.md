@@ -36,8 +36,11 @@ graph TD
 *   **[scripts/macro_pillar.py](scripts/macro_pillar.py)**: Macro regime detector and cross-asset sentiment scorer (now includes the GMM/HMM vol regime).
 *   **[scripts/score.py](scripts/score.py)**: Evaluator of the three-pillar framework and exit/entry decision engine, with ATR-based risk block.
 *   **[scripts/execution_plan.py](scripts/execution_plan.py)**: Execution planner — TWAP/VWAP-lite slicing, limit pricing by urgency, staleness/spread/imbalance/participation pre-trade checks.
+*   **[scripts/daily_briefing.py](scripts/daily_briefing.py)**: Runs the exact `score.py` rules over the whole watchlist and buckets every name into an actionable briefing — Opportunities (flat → enter), Warnings (holding → exit/trim), Holds, Watch.
+*   **[scripts/allocate.py](scripts/allocate.py)**: Turns a briefing into a **30-day budget book** for the Agentic account — maps each name's confidence score to a target **% of budget**, paces buys across the cycle, and applies a daily budget with strong-signal spill-over (see below).
+*   **[scripts/hist_to_batch.py](scripts/hist_to_batch.py)**: Token-safe glue — parses the (oversized) saved `get_equity_historicals` responses off-disk into the small `macro_input.json` + `batch.json` the pipeline consumes, so raw bar blobs never enter the agent's context.
 *   **[scripts/backtest.py](scripts/backtest.py)**: No-lookahead replay of the exact production rules with walk-forward segments and lag×cost sensitivity grid.
-*   **[scripts/render_proposal.py](scripts/render_proposal.py)**: Self-contained HTML action card showing exactly what is about to be executed, pending approval.
+*   **[scripts/render.py](scripts/render.py)**: Unified self-contained HTML view layer — `proposal`, `scanner`, `portfolio`, `backtest`, `briefing`, and `allocate` (30-day book) views. `render_proposal.py` is the standalone single-card renderer.
 
 ---
 
@@ -71,6 +74,38 @@ Calculated by the [scripts/macro_pillar.py](scripts/macro_pillar.py) cross-asset
 *   **Sector Rotation**: XLY/XLP ratio (cyclical vs. defensive sectors).
 *   **Inflationary Correlation**: Rolling SPY-TLT correlation.
 *   **Statistical Vol Regime** ([scripts/regime.py](scripts/regime.py)): a 2-state Gaussian Mixture is fitted on SPY daily log returns by EM (deterministic quantile initialization — no RNG), then smoothed with a sticky 2-state HMM (forward-backward, p_stay = 0.97) so the regime only flips on persistent evidence. A high-confidence *turbulent* state caps the macro pillar at 0 even when the (slower) ratio trends still look benign.
+
+---
+
+## 📊 Daily Briefing & 30-Day Budget Allocation
+
+The three-pillar score is a **confidence signal**; two layers turn it into an actionable book for the Agentic (cash) account.
+
+### Confidence score → buckets (`daily_briefing.py`)
+The briefing runs the exact `score.py` rules over every watchlist name and buckets each by its decision:
+
+| Bucket | Trigger |
+|---|---|
+| **Opportunities** | Flat + `RE-ENTRY` / `TACTICAL REBOUND` — a fresh entry trigger |
+| **Warnings** | Holding + `EXIT` / `EXIT / TRIM` — exhaustion or relentless bearish |
+| **Holds** | Holding + trend & momentum intact |
+| **Watch** | Everything else / insufficient history |
+
+Opportunities rank entries-first, then by `pillar_total` descending; Warnings rank exits-first, then by score ascending.
+
+### Confidence score → % of budget (`allocate.py`)
+The confidence score maps to a **target weight** (% of a 30-day budget), which paces into paced buy tranches:
+
+1. **Eligibility** — a name is a candidate if it's a fresh `RE-ENTRY`/`TACTICAL` trigger **or** already held and not exiting, with `pillar_total > min_score`. **Broad-market ETFs are excluded** (this sleeve is for tactical single-name rotation), unless `--allow-etfs`.
+2. **Weight ∝ score** — each candidate's weight is proportional to its `pillar_total`, then iteratively **capped per-name** at `min(per_name_cap, vol_target_fraction)` (default 25%), with the overflow redistributed to names with room. Higher conviction ⇒ larger slice, but no single name dominates.
+3. **Target dollars & gap** — `target$ = budget × weight × deploy`; `gap = target − current_value` (held names already at/above target need no buy).
+4. **30-day pacing** — instead of a lump sum, the book scales in over the cycle: the default **daily budget = monthly_remaining ÷ days_left**, self-correcting as scores and prices move. You can override it with an explicit `--daily-budget`.
+5. **Strong-signal spill-over** — when the top score is **≥ `spill_score` (default +4)** and there's still gap to fill, the day is allowed to deploy up to **`spill_mult` × the daily budget** (default 2×), pulling forward from the monthly pool — capped at `monthly_remaining` and total gap. Conviction days front-load capital.
+6. **Fill** — the day's `deploy_today` is filled **score-weighted** across names, each capped at its own gap; leftover redistributes.
+
+At **day 30 the cycle refreshes** (`cycle_index` advances): re-score, rebuild targets, and rotate — held names no longer eligible become `SELL → 0`.
+
+> Example (this desk, day 1, $500 budget, $20 daily budget): XOM +5, BA +4, SPCX +2 → target weights 25% / 25% / 18.7% (XOM & BA hit the 25% cap). Top score +5 ≥ +4 ⇒ **spill $20 → $40**, filled $14.56 / $14.56 / $10.88.
 
 ---
 
@@ -191,6 +226,32 @@ python3 scripts/macro_pillar.py macro.json --json > macro.json.out
 python3 scripts/render_proposal.py card.json --plan plan.json --macro macro.json.out -o proposal.html
 ```
 Produces a single self-contained HTML card (no external assets) showing the decision banner, the three pillars, active flags, the ATR/vol-target risk block, the macro + statistical vol regime, the sliced execution plan with its pre-trade check table, and the explicit *"nothing executes without your confirmation"* banner. This is the last screen the user sees before approving an order.
+
+### 8. Daily Briefing (Whole-Watchlist Scan)
+```bash
+python3 scripts/daily_briefing.py batch.json --json > briefing.json
+python3 scripts/render.py briefing briefing.json -o briefing.html
+```
+*Expected format for `batch.json`* (produced token-safely by `hist_to_batch.py` from saved historicals):
+```json
+{
+  "as_of": "2026-07-06",
+  "macro_score": 1,
+  "tickers": {
+    "NVDA": {"close": [...], "high": [...], "low": [...], "holding": true},
+    "AAPL": {"close": [...], "holding": false}
+  }
+}
+```
+Runs `score.py` over every ticker and returns the four buckets (Opportunities / Warnings / Holds / Watch) plus a flat `rows` list ranked by `pillar_total`. `render.py briefing` renders it as a scannable morning dashboard.
+
+### 9. 30-Day Budget Allocation (Score → % of Budget)
+```bash
+python3 scripts/allocate.py briefing.json --cash 500 \
+    --cycle-start 2026-07-06 --as-of 2026-07-06 --daily-budget 20 --json > book.json
+python3 scripts/render.py allocate book.json -o book.html
+```
+Key flags: `--cash` (budget, default 500), `--per-name-cap` (default 0.25), `--min-score` (default 0), `--daily-budget` (else paced = monthly_remaining ÷ days_left), `--spill-score` (default 4), `--spill-mult` (default 2), `--cycle-days` (default 30), `--held '{"SYM": market_value}'` for current holdings, `--allow-etfs`, `--exclude`. Output carries `account`, `cycle`, `daily` (input/paced/effective budget, spill flag), `buys` (per-name target weight %, target $, gap, `buy_today_dollars`/`buy_today_shares`), and `sells`. `render.py allocate` renders the read-only 30-day book (overview only — each order still executes one at a time through its own proposal card + confirmation).
 
 ---
 
