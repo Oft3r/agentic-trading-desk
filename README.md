@@ -97,7 +97,7 @@ Opportunities rank entries-first, then by `pillar_total` descending; Warnings ra
 The confidence score maps to a **target weight** (% of a 30-day budget), which paces into paced buy tranches:
 
 1. **Eligibility** — a name is a candidate if it's a fresh `RE-ENTRY`/`TACTICAL` trigger **or** already held and not exiting, with `pillar_total > min_score`. **Broad-market ETFs are excluded** (this sleeve is for tactical single-name rotation), unless `--allow-etfs`.
-2. **Weight ∝ score** — each candidate's weight is proportional to its `pillar_total`, then iteratively **capped per-name** at `min(per_name_cap, vol_target_fraction)` (default 25%), with the overflow redistributed to names with room. Higher conviction ⇒ larger slice, but no single name dominates.
+2. **Weight ∝ score, inverse-vol tilted** — each candidate's weight driver is `pillar_total × (ref_vol / σ̂)^vol_power`, where `σ̂` is the name's GARCH-forecast annualized vol and `ref_vol` is the **cross-sectional median σ̂** of the candidate set. So at equal score the **lower-vol name gets more capital** (true volatility targeting off the GARCH forecast, per-name); a market-wide vol spike shifts the *level* via pacing/spill, not the cross-sectional lean. The tilt flows into both target weights **and** the daily fill. `--vol-power 1` = inverse-vol (`1/σ̂`, default), `2` = inverse-variance (`1/σ̂²`); the multiplier is clamped to `[0.25, 4.0]`; names missing `σ̂` fall back to `1.0` (pure score). Disable with `--no-vol-weight`. Weights are then iteratively **capped per-name** at `min(per_name_cap, vol_target_fraction)` (default 25%), overflow redistributed to names with room — so no single name dominates.
 3. **Target dollars & gap** — `target$ = budget × weight × deploy`; `gap = target − current_value` (held names already at/above target need no buy).
 4. **30-day pacing** — instead of a lump sum, the book scales in over the cycle: the default **daily budget = monthly_remaining ÷ days_left**, self-correcting as scores and prices move. You can override it with an explicit `--daily-budget`.
 5. **Strong-signal spill-over** — when the top score is **≥ `spill_score` (default +4)** and there's still gap to fill, the day is allowed to deploy up to **`spill_mult` × the daily budget** (default 2×), pulling forward from the monthly pool — capped at `monthly_remaining` and total gap. Conviction days front-load capital.
@@ -106,6 +106,8 @@ The confidence score maps to a **target weight** (% of a 30-day budget), which p
 At **day 30 the cycle refreshes** (`cycle_index` advances): re-score, rebuild targets, and rotate — held names no longer eligible become `SELL → 0`.
 
 > Example (this desk, day 1, $500 budget, $20 daily budget): XOM +5, BA +4, SPCX +2 → target weights 25% / 25% / 18.7% (XOM & BA hit the 25% cap). Top score +5 ≥ +4 ⇒ **spill $20 → $40**, filled $14.56 / $14.56 / $10.88.
+>
+> The inverse-vol tilt is masked here because all three names are cap-bound at 25%. Loosen the cap (`--per-name-cap 0.6`) and it shows: with σ̂ of 9% / 34% / 80%, weights go from a pure-score 45.5 / 36.4 / 18.2% to **60 / 33 / 7%** — capital leans hard toward low-vol XOM and away from high-vol SPCX.
 
 ---
 
@@ -251,7 +253,7 @@ python3 scripts/allocate.py briefing.json --cash 500 \
     --cycle-start 2026-07-06 --as-of 2026-07-06 --daily-budget 20 --json > book.json
 python3 scripts/render.py allocate book.json -o book.html
 ```
-Key flags: `--cash` (budget, default 500), `--per-name-cap` (default 0.25), `--min-score` (default 0), `--daily-budget` (else paced = monthly_remaining ÷ days_left), `--spill-score` (default 4), `--spill-mult` (default 2), `--cycle-days` (default 30), `--held '{"SYM": market_value}'` for current holdings, `--allow-etfs`, `--exclude`. Output carries `account`, `cycle`, `daily` (input/paced/effective budget, spill flag), `buys` (per-name target weight %, target $, gap, `buy_today_dollars`/`buy_today_shares`), and `sells`. `render.py allocate` renders the read-only 30-day book (overview only — each order still executes one at a time through its own proposal card + confirmation).
+Key flags: `--cash` (budget, default 500), `--per-name-cap` (default 0.25), `--min-score` (default 0), `--vol-power` (inverse-vol exponent, default 1.0; `2` = inverse-variance), `--no-vol-weight` (disable inverse-vol sizing), `--daily-budget` (else paced = monthly_remaining ÷ days_left), `--spill-score` (default 4), `--spill-mult` (default 2), `--earnings-pause-days` (default 3), `--cycle-days` (default 30), `--held '{"SYM": market_value}'` for current holdings, `--allow-etfs`, `--exclude`. Output carries `account`, `cycle`, `daily` (input/paced/effective budget, spill flag), `params` (incl. `vol_weight`/`vol_power`/`ref_vol`), `buys` (per-name target weight %, target $, gap, `buy_today_dollars`/`buy_today_shares`, `forecast_vol`/`vol_mult`), and `sells`. `render.py allocate` renders the read-only 30-day book (overview only — each order still executes one at a time through its own proposal card + confirmation).
 
 ---
 
