@@ -68,6 +68,7 @@ def main() -> int:
     ap.add_argument("--as-of", default="", help="timestamp for the briefing/macro inputs")
     ap.add_argument("--yield-spread", help="optional JSON file: list of 10y-2y spread observations")
     ap.add_argument("--holdings", help="optional JSON file: {SYM: true/false} holding flags")
+    ap.add_argument("--earnings", help='optional JSON file: {SYM: {"next_date":"YYYY-MM-DD","timing":"am|pm","verified":bool}} from get_earnings_results')
     ap.add_argument("--macro-out", default="macro_input.json")
     ap.add_argument("--batch-out", default="batch.json")
     args = ap.parse_args()
@@ -79,6 +80,11 @@ def main() -> int:
     if args.holdings:
         with open(args.holdings) as fh:
             holdings = {k.upper(): bool(v) for k, v in json.load(fh).items()}
+
+    earnings = {}
+    if args.earnings:
+        with open(args.earnings) as fh:
+            earnings = {k.upper(): v for k, v in json.load(fh).items()}
 
     missing = [s for s in watch + macro if s not in bars]
     if missing:
@@ -96,7 +102,8 @@ def main() -> int:
     # batch.json  (watchlist OHLC + holding)  — macro_score injected later
     batch = {"as_of": args.as_of, "tickers": {
         s: {"close": bars[s]["close"], "high": bars[s]["high"],
-            "low": bars[s]["low"], "holding": holdings.get(s, False)}
+            "low": bars[s]["low"], "holding": holdings.get(s, False),
+            **({"earnings": earnings[s]} if s in earnings else {})}
         for s in watch if s in bars}}
     with open(args.batch_out, "w") as fh:
         json.dump(batch, fh)

@@ -86,6 +86,14 @@ def _valid(s: str) -> bool:
         return False
 
 
+def _earnings_days(ev: dict | None) -> int | None:
+    """days_until from an injected event_risk block (None if absent/invalid)."""
+    if not ev:
+        return None
+    d = ev.get("days_until")
+    return int(d) if isinstance(d, (int, float)) else None
+
+
 def _eligible(row: dict) -> bool:
     a = (row.get("action") or "").upper()
     held = bool(row.get("holding"))
@@ -102,7 +110,7 @@ def allocate(briefing: dict, cash: float = 500.0, deploy: float = 1.0,
              as_of: str | None = None, held: dict | None = None,
              allow_etfs: bool = False, exclude: set | None = None,
              daily_budget: float | None = None, spill_score: float = 4.0,
-             spill_mult: float = 2.0) -> dict:
+             spill_mult: float = 2.0, earnings_pause_days: int = 3) -> dict:
     rows = briefing.get("rows") or []
     as_of = as_of or briefing.get("as_of") or ""
     cycle_start = cycle_start or as_of
@@ -130,7 +138,17 @@ def allocate(briefing: dict, cash: float = 500.0, deploy: float = 1.0,
             "symbol": sym, "score": score, "close": _num(r.get("close")),
             "action": r.get("action"), "holding": sym in held_syms,
             "cap": min(per_name_cap, vol_cap if vol_cap > 0 else per_name_cap),
+            "earnings": r.get("earnings"),
         })
+
+    # Names reporting within earnings_pause_days: keep the TARGET weight (they
+    # stay in the book) but PAUSE today's DCA tranche — don't add into a print.
+    paused = {}
+    if earnings_pause_days and earnings_pause_days > 0:
+        for c in cand:
+            du = _earnings_days(c.get("earnings"))
+            if du is not None and 0 <= du <= earnings_pause_days:
+                paused[c["symbol"]] = du
 
     # 2. score-proportional weights with iterative cap + redistribution
     weights = {c["symbol"]: 0.0 for c in cand}
@@ -174,7 +192,9 @@ def allocate(briefing: dict, cash: float = 500.0, deploy: float = 1.0,
     # Strong-signal day → allow spending up to spill_mult × the daily budget,
     # pulling forward from the monthly pool (the "spill"). Concentrated on the
     # high-score names because the fill below is score-weighted.
-    top_score = max((c["score"] for c in cand), default=0.0)
+    # Only a name we can actually fund TODAY (not earnings-paused) justifies a
+    # strong-signal spill.
+    top_score = max((c["score"] for c in cand if c["symbol"] not in paused), default=0.0)
     strong = top_score >= spill_score and total_gap > base_daily
     deploy_today = base_daily * (spill_mult if strong else 1.0)
     deploy_today = round(min(deploy_today, monthly_remaining, total_gap), 2)
@@ -187,7 +207,7 @@ def allocate(briefing: dict, cash: float = 500.0, deploy: float = 1.0,
         pool = deploy_today - placed
         if pool <= 1e-6:
             break
-        open_names = [s for s in tgt if (tgt[s][3] - alloc[s]) > 1e-6]
+        open_names = [s for s in tgt if (tgt[s][3] - alloc[s]) > 1e-6 and s not in paused]
         wsum = sum(weights[s] for s in open_names)
         if not open_names or wsum <= 0:
             break
@@ -207,12 +227,16 @@ def allocate(briefing: dict, cash: float = 500.0, deploy: float = 1.0,
         w, target, cur, gap = tgt[sym]
         today = round(alloc[sym], 2)
         today_sh = round(today / c["close"], 6) if c["close"] > 0 else 0.0
+        ev = c.get("earnings")
         book.append({
             "symbol": sym, "score": c["score"], "action": c["action"],
             "holding": c["holding"], "close": c["close"],
             "target_weight_pct": round(w * 100, 2), "target_dollars": target,
             "current_value": round(cur, 2), "gap_to_target": round(gap, 2),
             "buy_today_dollars": today, "buy_today_shares": today_sh,
+            "earnings_date": (ev or {}).get("next_date"),
+            "earnings_days": _earnings_days(ev),
+            "earnings_paused": sym in paused,
             "side": "ADD" if c["holding"] else "BUY",
         })
     book.sort(key=lambda x: -x["target_weight_pct"])
@@ -243,9 +267,12 @@ def allocate(briefing: dict, cash: float = 500.0, deploy: float = 1.0,
                   "strong_signal": strong, "top_score": top_score,
                   "spill_score": spill_score, "spill_mult": spill_mult,
                   "deploy_today": deploy_today,
-                  "spilled": round(max(deploy_today - base_daily, 0.0), 2)},
+                  "spilled": round(max(deploy_today - base_daily, 0.0), 2),
+                  "earnings_paused": [{"symbol": s, "earnings_days": d}
+                                      for s, d in sorted(paused.items(), key=lambda kv: kv[1])]},
         "params": {"per_name_cap_pct": round(per_name_cap * 100, 2),
                    "min_score": min_score, "allow_etfs": allow_etfs,
+                   "earnings_pause_days": earnings_pause_days,
                    "excluded_etfs": sorted(excluded)},
         "summary": {"funded": len(funded), "deployed_target_pct": deployed_pct,
                     "invested_so_far": invested, "buy_today_dollars": buy_today,
@@ -268,15 +295,22 @@ def _print(a: dict) -> None:
           f"${d['monthly_remaining']:.2f} · DEPLOY TODAY ${d['deploy_today']:.2f}{spill}")
     print(f"funded {s['funded']} · target {s['deployed_target_pct']:.1f}% · invested "
           f"${s['invested_so_far']:.2f} · sells {s['sells']}")
+    if d.get("earnings_paused"):
+        ep = ", ".join(f"{p['symbol']}({p['earnings_days']}d)" for p in d["earnings_paused"])
+        print(f"⚠ DCA paused into earnings (≤{a['params']['earnings_pause_days']}d): {ep}")
     if a["params"]["excluded_etfs"]:
         print(f"excluded ETFs: {', '.join(a['params']['excluded_etfs'])}")
     print(f"\n{'SYM':6} {'SCORE':>5} {'TARGET%':>7} {'TARGET$':>8} {'HELD$':>7} "
           f"{'BUY_TODAY$':>10} {'SHARES':>9}  ACTION")
     for b in a["buys"]:
+        ecol = ""
+        if b.get("earnings_days") is not None:
+            ecol = (f"  ⚠ERN {b['earnings_days']}d" if b.get("earnings_paused")
+                    else f"  ern {b['earnings_days']}d")
         print(f"{b['symbol']:6} {b['score']:+5.0f} {b['target_weight_pct']:6.1f}% "
               f"{b['target_dollars']:8.2f} {b['current_value']:7.2f} "
               f"{b['buy_today_dollars']:10.2f} {b['buy_today_shares']:9.4f}  "
-              f"{b['side']} · {b['action']}")
+              f"{b['side']} · {b['action']}{ecol}")
     for x in a["sells"]:
         sh = x.get("sell_today_shares")
         print(f"{x['symbol']:6} {x['score']:+5.0f} {'0.0%':>7} {'—':>8} "
@@ -297,6 +331,8 @@ def main() -> int:
                     help="funded score at/above which today is a STRONG day (allows spill)")
     ap.add_argument("--spill-mult", type=float, default=2.0,
                     help="on a strong day, deploy up to this × the daily budget (from the monthly pool)")
+    ap.add_argument("--earnings-pause-days", type=int, default=3,
+                    help="pause today's DCA for names reporting within N days (0 disables)")
     ap.add_argument("--cycle-days", type=int, default=30, help="budget cycle length in days")
     ap.add_argument("--cycle-start", help="YYYY-MM-DD anchor for the cycle (default: as-of)")
     ap.add_argument("--as-of", help="YYYY-MM-DD today (default: briefing as_of)")
@@ -331,7 +367,8 @@ def main() -> int:
                  cycle_days=args.cycle_days, cycle_start=args.cycle_start,
                  as_of=args.as_of, held=held, allow_etfs=args.allow_etfs,
                  exclude=exclude, daily_budget=args.daily_budget,
-                 spill_score=args.spill_score, spill_mult=args.spill_mult)
+                 spill_score=args.spill_score, spill_mult=args.spill_mult,
+                 earnings_pause_days=args.earnings_pause_days)
     if args.out:
         with open(args.out, "w") as f:
             json.dump(a, f, indent=2)

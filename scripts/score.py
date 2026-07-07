@@ -19,11 +19,44 @@ stdlib only.
 """
 from __future__ import annotations
 import argparse
+import datetime as _dt
 import json
 import sys
 from typing import Optional
 
 import indicators as I
+
+
+# --------------------------------------------------------------------------
+# Event risk: upcoming earnings (data injected from get_earnings_results)
+# --------------------------------------------------------------------------
+
+def _event_risk(earnings: Optional[dict], as_of: Optional[str],
+                warn_days: int) -> Optional[dict]:
+    """Turn an injected earnings record into a forward-looking event-risk block.
+
+    `earnings` = {"next_date": "YYYY-MM-DD", "timing": "am"|"pm", "verified": bool}.
+    days_until is measured from as_of (or today). within_warn flags a print that
+    lands inside the warning window — an event the technical score cannot see."""
+    if not earnings or not earnings.get("next_date"):
+        return None
+    try:
+        nd = _dt.date.fromisoformat(str(earnings["next_date"])[:10])
+    except (ValueError, TypeError):
+        return None
+    try:
+        base = _dt.date.fromisoformat(str(as_of)[:10]) if as_of else _dt.date.today()
+    except (ValueError, TypeError):
+        base = _dt.date.today()
+    days_until = (nd - base).days
+    return {
+        "next_date": nd.isoformat(),
+        "timing": earnings.get("timing"),
+        "verified": bool(earnings.get("verified", False)),
+        "days_until": days_until,
+        "within_warn": 0 <= days_until <= warn_days,
+        "warn_days": warn_days,
+    }
 
 
 # --------------------------------------------------------------------------
@@ -288,12 +321,32 @@ def score_symbol(close: list[float], macro_score: Optional[int] = None,
                  slope_lookback: int = 5,
                  high: Optional[list[float]] = None,
                  low: Optional[list[float]] = None,
-                 with_garch: bool = True) -> dict:
+                 with_garch: bool = True,
+                 earnings: Optional[dict] = None,
+                 as_of: Optional[str] = None,
+                 earnings_warn_days: int = 7) -> dict:
     ind = I.compute(close, slope_lookback, high, low, with_garch)
     t, t_detail = score_trend(ind)
     m, m_detail = score_momentum(ind)
     dec = decide(ind, t, m, macro_score, holding)
     composite = t + m + (macro_score if macro_score is not None else 0)
+
+    # Event risk is NOT a pillar (it does not move the numeric score); it is a
+    # forward-looking overlay that flags an imminent print the technicals can't
+    # see, and tightens the framing for entries/holds.
+    ev = _event_risk(earnings, as_of, earnings_warn_days)
+    if ev and ev["within_warn"]:
+        d = ev["days_until"]
+        when = "today" if d == 0 else "tomorrow" if d == 1 else f"in {d} days"
+        tag = "" if ev["verified"] else " (tentative)"
+        a = dec["action"].upper()
+        if a.startswith(("RE-ENTRY", "TACTICAL", "WAIT")):
+            dec["framing"] += (f" ⚠ Earnings {when} ({ev['next_date']} {ev['timing'] or ''}){tag}: "
+                               "event risk the score can't price — enter reduced or wait for the print.")
+        elif a.startswith("HOLD"):
+            dec["framing"] += (f" ⚠ Earnings {when} ({ev['next_date']} {ev['timing'] or ''}){tag}: "
+                               "consider trimming into the print or setting a tighter stop.")
+
     return {
         "symbol": symbol,
         "n_bars": ind["n_bars"],
@@ -305,6 +358,7 @@ def score_symbol(close: list[float], macro_score: Optional[int] = None,
         },
         "pillar_total": composite,
         "decision": dec,
+        "event_risk": ev,
         "risk": I._round(_risk_block(ind, dec["action"]) or {}) or None,
         "indicators": I._round(ind),
     }
@@ -329,6 +383,13 @@ def render(card: dict) -> str:
     L.append(f"{'─'*54}")
     L.append(f"  ► {d['action']}  —  {d['rationale']}")
     L.append(f"    {d['framing']}")
+    ev = card.get("event_risk")
+    if ev:
+        d_u = ev["days_until"]
+        when = "TODAY" if d_u == 0 else "tomorrow" if d_u == 1 else f"in {d_u}d"
+        vf = "" if ev["verified"] else " (tentative)"
+        mark = "⚠ " if ev["within_warn"] else "  "
+        L.append(f"  {mark}EARNINGS {when} — {ev['next_date']} {ev['timing'] or ''}{vf}")
     f = d["flags"]
     if f["exhaustion"]:
         L.append(f"    exhaustion: {'; '.join(f['exhaustion'])}")
@@ -374,6 +435,8 @@ def main() -> int:
             holding=raw.get("holding"),
             high=[float(x) for x in raw["high"]] if raw.get("high") else None,
             low=[float(x) for x in raw["low"]] if raw.get("low") else None,
+            earnings=raw.get("earnings"),
+            as_of=raw.get("as_of"),
         )
     else:
         import math

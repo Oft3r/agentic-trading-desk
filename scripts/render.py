@@ -285,6 +285,21 @@ def build_proposal(card: dict, plan: Optional[dict] = None,
         B.append("</div>")
     B.append("</div>")
 
+    ev = card.get("event_risk")
+    if ev:
+        du = ev.get("days_until")
+        when = "TODAY" if du == 0 else "tomorrow" if du == 1 else f"in {du} days"
+        vf = "" if ev.get("verified") else " · tentative"
+        tm = (ev.get("timing") or "").upper()
+        warn = ev.get("within_warn")
+        bg, bd, ic = ("#3a2a10", "#b8860b", "⚠") if warn else ("#111725", "#2b3446", "🗓")
+        note = (" — event risk the technical score can't price; size down or wait for the print"
+                if warn else "")
+        B.append(
+            f'<div class="card" style="background:{bg};border-color:{bd}">'
+            f'<h2>{ic} Earnings {when}</h2>'
+            f'<div><b>{E(ev.get("next_date",""))}</b> {tm}{vf}{note}</div></div>')
+
     r = card.get("risk")
     if r:
         B.append('<div class="card"><h2>Risk (ATR / vol-target)</h2>')
@@ -419,13 +434,21 @@ def build_allocate(a: dict) -> str:
             spill = (f' · <b style="color:var(--amber)">+${_num(dly.get("spilled"),0):.2f} SPILL</b>'
                      f' (strong: top score {int(_num(dly.get("top_score"),0)):+d}'
                      f'≥{int(_num(dly.get("spill_score"),0)):+d})')
+        paused = dly.get("earnings_paused") or []
+        prow = ""
+        if paused:
+            pd = ", ".join(f'{E(p.get("symbol",""))} ({p.get("earnings_days")}d)' for p in paused)
+            pdays = prm.get("earnings_pause_days", "?")
+            prow = (f'<div class="kv"><span class="k">⚠ DCA paused (≤{pdays}d to earnings)</span>'
+                    f'<span style="color:var(--amber)">{pd}</span></div>')
         B.append(f'<div class="card"><h2>Today\'s budget</h2>'
                  f'<div class="kv"><span class="k">Daily budget ({E(src)})</span>'
                  f'<span>${_num(dly.get("effective_budget"),0):.2f}</span></div>'
                  f'<div class="kv"><span class="k">Monthly remaining</span>'
                  f'<span>${_num(dly.get("monthly_remaining"),0):.2f}</span></div>'
                  f'<div class="kv"><span class="k">Deploy today</span>'
-                 f'<span><b>${_num(dly.get("deploy_today"),0):.2f}</b>{spill}</span></div></div>')
+                 f'<span><b>${_num(dly.get("deploy_today"),0):.2f}</b>{spill}</span></div>'
+                 f'{prow}</div>')
 
     banner = (f'Deploy target {s.get("deployed_target_pct",0):.0f}% · invested '
               f'${s.get("invested_so_far",0):.2f} · <b>deploy today ${s.get("buy_today_dollars",0):.2f}</b>'
@@ -443,6 +466,14 @@ def build_allocate(a: dict) -> str:
         w = _num(b.get("target_weight_pct"), 0) or 0
         sc = int(_num(b.get("score"), 0) or 0)
         scc = "pos" if sc > 0 else "neg" if sc < 0 else "zero"
+        ern = ""
+        edays = b.get("earnings_days")
+        if edays is not None:
+            if b.get("earnings_paused"):
+                ern = (f' <span class="badge" style="background:#3a2a10;color:#e0b34a">'
+                       f'⚠ ERN {edays}d — DCA paused</span>')
+            else:
+                ern = f' <span class="hint">🗓 ern {edays}d</span>'
         B.append(
             f'<tr><td><b>{E(b.get("symbol",""))}</b></td>'
             f'<td class="{scc}">{sc:+d}</td>'
@@ -452,7 +483,7 @@ def build_allocate(a: dict) -> str:
             f'<td class="r">{_num(b.get("current_value"),0):.2f}</td>'
             f'<td class="r"><b>{_num(b.get("buy_today_dollars"),0):.2f}</b></td>'
             f'<td class="r">{_num(b.get("buy_today_shares"),0):.4f}</td>'
-            f'<td><span class="badge b-enter">{E(b.get("side",""))}</span> {E(b.get("action",""))}</td></tr>')
+            f'<td><span class="badge b-enter">{E(b.get("side",""))}</span> {E(b.get("action",""))}{ern}</td></tr>')
     B.append('</table></div>')
 
     sells = a.get("sells", [])
@@ -614,6 +645,14 @@ def _brief_card(row: dict, accent: str) -> str:
         chips.append(f'<span class="chip">vol {row["forecast_vol"]*100:.1f}%</span>')
     if row.get("size_fraction") is not None:
         chips.append(f'<span class="chip">size {row["size_fraction"]*100:.0f}%</span>')
+    ev = row.get("earnings")
+    if ev:
+        du = ev.get("days_until")
+        warn = ev.get("within_warn")
+        col = "var(--amber)" if warn else "var(--dim)"
+        icon = "⚠" if warn else "🗓"
+        chips.append(f'<span class="chip" style="color:{col}">{icon} earnings {du}d '
+                     f'({E(ev.get("next_date",""))})</span>')
     if chips:
         B.append('<div class="chips">' + "".join(chips) + '</div>')
     if row.get("note"):

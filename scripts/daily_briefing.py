@@ -94,11 +94,19 @@ def build(batch: dict) -> dict:
         card = S.score_symbol(close, macro_score=macro_score, symbol=sym.upper(),
                               holding=bool(td.get("holding")),
                               high=td.get("high"), low=td.get("low"),
-                              with_garch=td.get("with_garch", True))
+                              with_garch=td.get("with_garch", True),
+                              earnings=td.get("earnings"),
+                              as_of=batch.get("as_of"))
         d = card["decision"]
         p = card["pillars"]
         r = card.get("risk") or {}
+        ev = card.get("event_risk")
         action = d["action"]
+        pats = _patterns(d["flags"])
+        if ev and ev["within_warn"]:
+            _du = ev["days_until"]
+            _w = "today" if _du == 0 else "tomorrow" if _du == 1 else f"in {_du}d"
+            pats.append(f"⚠ earnings {_w} ({ev['next_date']})")
         rows.append({
             "symbol": card["symbol"],
             "action": action,
@@ -115,7 +123,8 @@ def build(batch: dict) -> dict:
             "size_fraction": r.get("vol_target_fraction"),
             "forecast_vol": r.get("forecast_vol_annual"),
             "zscore_20": r.get("zscore_20"),
-            "patterns": _patterns(d["flags"]),
+            "earnings": ev,
+            "patterns": pats,
             "note": f'{d["rationale"]} {d["framing"]}'.strip(),
         })
 
