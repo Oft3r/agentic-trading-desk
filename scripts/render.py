@@ -467,6 +467,11 @@ def build_allocate(a: dict) -> str:
         w = _num(b.get("target_weight_pct"), 0) or 0
         sc = int(_num(b.get("score"), 0) or 0)
         scc = "pos" if sc > 0 else "neg" if sc < 0 else "zero"
+        vhint = ""
+        if b.get("forecast_vol"):
+            vm = _num(b.get("vol_mult"), 1.0)
+            vhint = (f' <span class="hint">· σ̂ {_num(b.get("forecast_vol"),0)*100:.0f}%'
+                     f' · {vm:.2f}×</span>')
         ern = ""
         if b.get("earnings_days") is not None:
             edays = int(_num(b.get("earnings_days"), 0) or 0)
@@ -479,7 +484,7 @@ def build_allocate(a: dict) -> str:
             f'<tr><td><b>{E(b.get("symbol",""))}</b></td>'
             f'<td class="{scc}">{sc:+d}</td>'
             f'<td><div class="abar"><span style="width:{min(w,100):.1f}%"></span></div>'
-            f'<span class="hint">{w:.1f}%</span></td>'
+            f'<span class="hint">{w:.1f}%</span>{vhint}</td>'
             f'<td class="r">{_num(b.get("target_dollars"),0):.2f}</td>'
             f'<td class="r">{_num(b.get("current_value"),0):.2f}</td>'
             f'<td class="r"><b>{_num(b.get("buy_today_dollars"),0):.2f}</b></td>'
