@@ -1,0 +1,72 @@
+<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Agentic — 30-day budget book</title><style>
+:root{--bg:#0d1117;--panel:#161b22;--panel2:#1c2230;--line:#30363d;--txt:#e6edf3;
+--dim:#8b949e;--green:#3fb950;--red:#f85149;--amber:#d29922;--blue:#58a6ff;
+--purple:#bc8cff;}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--txt);font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;padding:24px;max-width:1080px;margin:auto}
+h1{font-size:20px;margin-bottom:4px}
+h2{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px}
+.sub{color:var(--dim);margin-bottom:14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:18px;margin-bottom:16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}
+.banner{border-radius:8px;padding:14px 18px;font-size:17px;font-weight:700;margin-bottom:16px;border:1px solid}
+.banner.exit{background:#2d1214;border-color:var(--red);color:var(--red)}
+.banner.enter{background:#0f2417;border-color:var(--green);color:var(--green)}
+.banner.hold{background:#1b2030;border-color:var(--blue);color:var(--blue)}
+.banner.wait{background:#251d0e;border-color:var(--amber);color:var(--amber)}
+.banner small{display:block;font-weight:400;font-size:13px;color:var(--txt);margin-top:4px}
+.badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;border:1px solid}
+.b-exit{background:#2d1214;border-color:var(--red);color:var(--red)}
+.b-enter{background:#0f2417;border-color:var(--green);color:var(--green)}
+.b-hold{background:#1b2030;border-color:var(--blue);color:var(--blue)}
+.b-wait{background:#251d0e;border-color:var(--amber);color:var(--amber)}
+.b-prot{background:#1e1533;border-color:var(--purple);color:var(--purple)}
+.pillars{display:flex;gap:12px}
+.pillar{flex:1;text-align:center;padding:10px;border:1px solid var(--line);border-radius:6px}
+.pillar .val{font-size:26px;font-weight:700}
+.pillar .val.pos{color:var(--green)}.pillar .val.neg{color:var(--red)}.pillar .val.zero{color:var(--dim)}
+.pillar .name{color:var(--dim);font-size:12px}
+.pillar .det{font-size:11px;color:var(--dim);margin-top:6px}
+.flag{display:block;padding:2px 0;font-size:13px}
+.flag.exh{color:var(--amber)}.flag.bear{color:var(--red)}.flag.reb{color:var(--green)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+td,th{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left}
+th{color:var(--dim);font-weight:400;font-size:12px;text-transform:uppercase}
+.r{text-align:right}
+.chk-PASS{color:var(--green)}.chk-WARN{color:var(--amber)}.chk-BLOCK{color:var(--red)}.chk-SKIP{color:var(--dim)}
+.kv{display:flex;justify-content:space-between;padding:3px 0;font-size:13px}
+.kv .k{color:var(--dim)}
+.pos{color:var(--green)}.neg{color:var(--red)}.zero{color:var(--dim)}
+.footer{color:var(--dim);font-size:11px;text-align:center;margin-top:12px}
+/* diverging pillar bar */
+.pbar{position:relative;height:14px;background:var(--panel2);border-radius:3px;margin:4px 0}
+.pbar .mid{position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--line)}
+.pbar .fill{position:absolute;top:1px;bottom:1px;border-radius:2px}
+.pbar .fill.pos{background:var(--green);left:50%}
+.pbar .fill.neg{background:var(--red);right:50%}
+.plabel{display:flex;justify-content:space-between;font-size:11px;color:var(--dim)}
+/* allocation bar */
+.abar{height:16px;background:var(--panel2);border-radius:3px;overflow:hidden}
+.abar>span{display:block;height:100%;background:var(--blue)}
+/* scanner card */
+.scard{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px}
+.scard .top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}
+.scard .sym{font-size:16px;font-weight:700}
+.scard .px{color:var(--dim);font-size:13px}
+.chips{margin-top:8px}
+.chip{display:inline-block;background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:1px 6px;font-size:11px;color:var(--dim);margin:2px 4px 0 0}
+/* approval form */
+.approve{background:#0f1a12;border:1px solid var(--green);border-radius:8px;padding:16px 18px;margin-bottom:16px}
+.approve label{display:block;font-size:12px;color:var(--dim);margin:8px 0 3px}
+.approve input,.approve select{background:#0d1117;color:var(--txt);border:1px solid var(--line);border-radius:5px;padding:7px 9px;font:inherit;width:100%}
+.approve .row{display:flex;gap:12px}.approve .row>div{flex:1}
+.btnrow{display:flex;gap:10px;margin-top:14px}
+button{font:inherit;font-weight:700;border-radius:6px;padding:10px 16px;border:1px solid;cursor:pointer}
+.bapprove{background:#0f2417;border-color:var(--green);color:var(--green)}
+.breject{background:#2d1214;border-color:var(--red);color:var(--red)}
+.confirm{background:#2d1214;border:1px solid var(--red);border-radius:8px;padding:14px 18px;text-align:center;font-weight:700;color:var(--red)}
+#out{display:none;margin-top:14px;background:#0d1117;border:1px dashed var(--green);border-radius:6px;padding:12px}
+#out.show{display:block}
+#outline{font-size:14px;font-weight:700;word-break:break-word;white-space:pre-wrap}
+.hint{color:var(--dim);font-size:11px;margin-top:6px}
+</style></head><body><h1>Agentic — 30-day budget book</h1><div class="sub">2026-07-07 · $500 monthly budget · cycle #0 · day 2/30 · 29 days left</div><div class="card"><h2>Today's budget</h2><div class="kv"><span class="k">Daily budget (your input)</span><span>$100.00</span></div><div class="kv"><span class="k">Monthly remaining</span><span>$485.47</span></div><div class="kv"><span class="k">Deploy today</span><span><b>$200.00</b> · <b style="color:var(--amber)">+$100.00 SPILL</b> (strong: top score +4≥+4)</span></div></div><div class="banner hold">► 30-DAY PACING<small>Deploy target 100% · invested $14.53 · <b>deploy today $200.01</b> · 7 funded · 1 to sell · cycle 2026-07-06 → 2026-08-04</small></div><div class="card"><h2>Targets & today's tranche</h2><table><tr><th>Symbol</th><th>Score</th><th>Target</th><th class="r">Target $</th><th class="r">Held $</th><th class="r">Buy today $</th><th class="r">Shares</th><th>Action</th></tr><tr><td><b>XOM</b></td><td class="pos">+4</td><td><div class="abar"><span style="width:25.0%"></span></div><span class="hint">25.0%</span> <span class="hint">· σ̂ 8% · 4.00×</span></td><td class="r">125.00</td><td class="r">14.53</td><td class="r"><b>50.00</b></td><td class="r">0.3665</td><td><span class="badge b-enter">ADD</span> HOLD (ride the cycle)</td></tr><tr><td><b>VONG</b></td><td class="pos">+3</td><td><div class="abar"><span style="width:25.0%"></span></div><span class="hint">25.0%</span> <span class="hint">· σ̂ 20% · 1.87×</span></td><td class="r">125.00</td><td class="r">0.00</td><td class="r"><b>50.00</b></td><td class="r">0.3951</td><td><span class="badge b-enter">BUY</span> RE-ENTRY (new cycle)</td></tr><tr><td><b>VYM</b></td><td class="pos">+3</td><td><div class="abar"><span style="width:25.0%"></span></div><span class="hint">25.0%</span> <span class="hint">· σ̂ 11% · 3.46×</span></td><td class="r">125.00</td><td class="r">0.00</td><td class="r"><b>50.00</b></td><td class="r">0.3122</td><td><span class="badge b-enter">BUY</span> RE-ENTRY (new cycle)</td></tr><tr><td><b>AMD</b></td><td class="pos">+3</td><td><div class="abar"><span style="width:7.7%"></span></div><span class="hint">7.7%</span> <span class="hint">· σ̂ 72% · 0.52×</span></td><td class="r">38.30</td><td class="r">0.00</td><td class="r"><b>15.32</b></td><td class="r">0.0278</td><td><span class="badge b-enter">BUY</span> RE-ENTRY (new cycle)</td></tr><tr><td><b>TSM</b></td><td class="pos">+2</td><td><div class="abar"><span style="width:6.5%"></span></div><span class="hint">6.5%</span> <span class="hint">· σ̂ 56% · 0.66×</span></td><td class="r">32.74</td><td class="r">0.00</td><td class="r"><b>13.10</b></td><td class="r">0.0290</td><td><span class="badge b-enter">BUY</span> RE-ENTRY (new cycle)</td></tr><tr><td><b>DJT</b></td><td class="pos">+2</td><td><div class="abar"><span style="width:5.8%"></span></div><span class="hint">5.8%</span> <span class="hint">· σ̂ 63% · 0.59×</span></td><td class="r">29.24</td><td class="r">0.00</td><td class="r"><b>11.70</b></td><td class="r">1.3510</td><td><span class="badge b-enter">BUY</span> RE-ENTRY (new cycle)</td></tr><tr><td><b>META</b></td><td class="pos">+1</td><td><div class="abar"><span style="width:4.9%"></span></div><span class="hint">4.9%</span> <span class="hint">· σ̂ 37% · 1.00×</span></td><td class="r">24.72</td><td class="r">0.00</td><td class="r"><b>9.89</b></td><td class="r">0.0165</td><td><span class="badge b-enter">BUY</span> RE-ENTRY (new cycle)</td></tr></table></div><div class="card"><h2>Rotate out (sell to cash)</h2><table><tr><th>Symbol</th><th>Score</th><th class="r">Held $</th><th class="r">Shares</th><th>Reason</th></tr><tr><td><b>BA</b></td><td class="neg">+4</td><td class="r">14.56</td><td class="r">0.0621</td><td>no longer eligible — rotate to cash</td></tr></table></div><div class="card"><h2>Excluded (broad-index ETFs)</h2><div class="sub" style="margin:0">IVV, QQQ, QQQM, SPY, VEA, VOO, VTI, VWO, VXUS — single-name rotation only (per-name cap 25%)</div></div><div class="confirm">⛔ OVERVIEW ONLY — each BUY/SELL needs its own proposal card: review_equity_order (simulation) → your APPROVE → place_equity_order.</div><div class="footer">agentic-trading-desk · 30-day paced budget · human-approved execution</div></body></html>

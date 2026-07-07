@@ -238,12 +238,49 @@ its **own proposal card** (`render.py proposal … --plan plan.json`), run
 `✅ APPROVE … [token …]`, then `place_equity_order`. One card per BUY and per
 SELL. Nothing places from the overview page.
 
+**Refresh limit prices to latest BEFORE every placement (mandatory).** The
+approval token binds the limit price captured when the proposal card was built.
+Time passes between build and the pasted APPROVE (minutes, or — for the
+7:04am market-open batch — an entire session), so that limit is stale by the
+time you place. Immediately before `place_equity_order`, and after the token
+matches:
+  1. `get_equity_quotes` for the symbol → a **fresh quote (<5s old)**.
+  2. **Confirm the venue timestamp is inside `regular_hours`.** Dollar/fractional
+     (notional) orders are rejected outside regular hours — if the session has
+     closed, do NOT fire; defer to the next regular open and log it.
+  3. Re-run `execution_plan.py` on the fresh quote to recompute the limit.
+  4. If the refreshed limit has moved beyond a small tolerance from the approved
+     limit (default: >0.5% for liquid names, or any gap for market-open orders),
+     **re-surface the updated card for a new APPROVE** — never silently place at
+     a materially different price than the one the user approved.
+  5. Place with the **latest** price (limit orders: the refreshed limit; notional
+     market orders: `dollar_amount` at the fresh quote), never the stale one.
+This is especially critical for **market-open orders**, where overnight gaps
+routinely blow past the prior close the card was built from.
+
 **Daily loop (7:04am job):** after the shared briefing, **ask the user for
 today's daily budget** (use the paced default if there's no reply), run
 `allocate.py` with the persisted `--cycle-start`, render the book to
 `~/Downloads`, and generate a proposal card per non-zero tranche. Placement
 still waits on the user's pasted APPROVE per order — never autonomous (same
 guardrail as Auto Pilot Mode).
+
+**Always commit + push the daily briefing HTML (mandatory, part of the loop).**
+The `~/Downloads` copies are local-only; the user checks the committed repo copy.
+So on **every** loop run — right after the briefings render and **before** any
+order placement — also write the HTML into the repo and push it:
+  1. Timestamp once: `TS=$(TZ=America/Los_Angeles date +%Y-%m-%dT%H%M%Z)`
+     (e.g. `2026-07-07T1547PDT`).
+  2. Write the day's artifacts under `briefings/<YYYY-MM-DD>/` with the timestamp
+     in each filename: `briefing_top100_<TS>.html`, `briefing_firstlist_<TS>.html`,
+     `agentic_book_<TS>.html` (+ any portfolio briefing). Keep prior runs — never
+     overwrite; each run is a new timestamped file so intraday re-runs are diffable.
+  3. `git add briefings/ state/agentic_budget_log.json` then
+     `git commit -m "briefings: daily brief <YYYY-MM-DD> <TS>"` and
+     `git push origin <current-branch>`.
+  4. Surface the pushed GitHub URL(s) in the report so the user can open them
+     immediately. This commit is briefing artifacts only — it does NOT place any
+     order and does not depend on any approval.
 
 **Track the daily budget used.** Each run appends one entry to
 `state/agentic_budget_log.json` (a JSON list) from the book's `daily`/`cycle`
@@ -319,7 +356,15 @@ Loop body (every scan_interval_sec):
    e. review_equity_order (simulation) — always, even in full auto.
    f. **Require the user's pasted-back `✅ APPROVE … [token …]` line** for that
       proposal before proceeding. No paste / a `❌ REJECT` line → skip, log, move on.
-   g. Only if review passes, the token matches, AND config.dry_run is false: place_equity_order.
+   f2. **Refresh the limit price to latest before placing** (mandatory — the
+      approved limit is stale once time has passed, and gaps most at the open):
+      re-`get_equity_quotes` (<5s), confirm the venue timestamp is inside
+      regular_hours (notional/fractional orders reject otherwise — defer to next
+      open + log), re-run `execution_plan.py` on the fresh quote. If the refreshed
+      limit moved beyond tolerance (>0.5%, or any gap for market-open orders),
+      re-surface the updated card for a new APPROVE; else carry the latest price forward.
+   g. Only if review passes, the token matches, the price was refreshed to latest,
+      AND config.dry_run is false: place_equity_order (with the refreshed price).
    h. Append the proposal path + review/execution result to state/auto_status.json log.
 7. If daily_stats.hard_stopped becomes true: stop the loop.
 

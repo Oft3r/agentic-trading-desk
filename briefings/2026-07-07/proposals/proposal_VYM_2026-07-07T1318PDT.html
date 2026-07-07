@@ -1,0 +1,111 @@
+<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>VYM — proposal</title><style>
+:root{--bg:#0d1117;--panel:#161b22;--panel2:#1c2230;--line:#30363d;--txt:#e6edf3;
+--dim:#8b949e;--green:#3fb950;--red:#f85149;--amber:#d29922;--blue:#58a6ff;
+--purple:#bc8cff;}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--txt);font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;padding:24px;max-width:1080px;margin:auto}
+h1{font-size:20px;margin-bottom:4px}
+h2{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px}
+.sub{color:var(--dim);margin-bottom:14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:18px;margin-bottom:16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}
+.banner{border-radius:8px;padding:14px 18px;font-size:17px;font-weight:700;margin-bottom:16px;border:1px solid}
+.banner.exit{background:#2d1214;border-color:var(--red);color:var(--red)}
+.banner.enter{background:#0f2417;border-color:var(--green);color:var(--green)}
+.banner.hold{background:#1b2030;border-color:var(--blue);color:var(--blue)}
+.banner.wait{background:#251d0e;border-color:var(--amber);color:var(--amber)}
+.banner small{display:block;font-weight:400;font-size:13px;color:var(--txt);margin-top:4px}
+.badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;border:1px solid}
+.b-exit{background:#2d1214;border-color:var(--red);color:var(--red)}
+.b-enter{background:#0f2417;border-color:var(--green);color:var(--green)}
+.b-hold{background:#1b2030;border-color:var(--blue);color:var(--blue)}
+.b-wait{background:#251d0e;border-color:var(--amber);color:var(--amber)}
+.b-prot{background:#1e1533;border-color:var(--purple);color:var(--purple)}
+.pillars{display:flex;gap:12px}
+.pillar{flex:1;text-align:center;padding:10px;border:1px solid var(--line);border-radius:6px}
+.pillar .val{font-size:26px;font-weight:700}
+.pillar .val.pos{color:var(--green)}.pillar .val.neg{color:var(--red)}.pillar .val.zero{color:var(--dim)}
+.pillar .name{color:var(--dim);font-size:12px}
+.pillar .det{font-size:11px;color:var(--dim);margin-top:6px}
+.flag{display:block;padding:2px 0;font-size:13px}
+.flag.exh{color:var(--amber)}.flag.bear{color:var(--red)}.flag.reb{color:var(--green)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+td,th{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left}
+th{color:var(--dim);font-weight:400;font-size:12px;text-transform:uppercase}
+.r{text-align:right}
+.chk-PASS{color:var(--green)}.chk-WARN{color:var(--amber)}.chk-BLOCK{color:var(--red)}.chk-SKIP{color:var(--dim)}
+.kv{display:flex;justify-content:space-between;padding:3px 0;font-size:13px}
+.kv .k{color:var(--dim)}
+.pos{color:var(--green)}.neg{color:var(--red)}.zero{color:var(--dim)}
+.footer{color:var(--dim);font-size:11px;text-align:center;margin-top:12px}
+/* diverging pillar bar */
+.pbar{position:relative;height:14px;background:var(--panel2);border-radius:3px;margin:4px 0}
+.pbar .mid{position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--line)}
+.pbar .fill{position:absolute;top:1px;bottom:1px;border-radius:2px}
+.pbar .fill.pos{background:var(--green);left:50%}
+.pbar .fill.neg{background:var(--red);right:50%}
+.plabel{display:flex;justify-content:space-between;font-size:11px;color:var(--dim)}
+/* allocation bar */
+.abar{height:16px;background:var(--panel2);border-radius:3px;overflow:hidden}
+.abar>span{display:block;height:100%;background:var(--blue)}
+/* scanner card */
+.scard{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px}
+.scard .top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}
+.scard .sym{font-size:16px;font-weight:700}
+.scard .px{color:var(--dim);font-size:13px}
+.chips{margin-top:8px}
+.chip{display:inline-block;background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:1px 6px;font-size:11px;color:var(--dim);margin:2px 4px 0 0}
+/* approval form */
+.approve{background:#0f1a12;border:1px solid var(--green);border-radius:8px;padding:16px 18px;margin-bottom:16px}
+.approve label{display:block;font-size:12px;color:var(--dim);margin:8px 0 3px}
+.approve input,.approve select{background:#0d1117;color:var(--txt);border:1px solid var(--line);border-radius:5px;padding:7px 9px;font:inherit;width:100%}
+.approve .row{display:flex;gap:12px}.approve .row>div{flex:1}
+.btnrow{display:flex;gap:10px;margin-top:14px}
+button{font:inherit;font-weight:700;border-radius:6px;padding:10px 16px;border:1px solid;cursor:pointer}
+.bapprove{background:#0f2417;border-color:var(--green);color:var(--green)}
+.breject{background:#2d1214;border-color:var(--red);color:var(--red)}
+.confirm{background:#2d1214;border:1px solid var(--red);border-radius:8px;padding:14px 18px;text-align:center;font-weight:700;color:var(--red)}
+#out{display:none;margin-top:14px;background:#0d1117;border:1px dashed var(--green);border-radius:6px;padding:12px}
+#out.show{display:block}
+#outline{font-size:14px;font-weight:700;word-break:break-word;white-space:pre-wrap}
+.hint{color:var(--dim);font-size:11px;margin-top:6px}
+</style></head><body><h1>VYM</h1><div class="sub">40 bars · pillar total <b>+3</b> / ±6</div><div class="banner enter">► RE-ENTRY (new cycle)<small>Rebound/reversal with healthy EMA structure: likely start of a new bullish cycle. Valid entry trigger. Confirm with candle/volume before entering full size; stop below the rebound pivot. </small></div><div class="card"><h2>Three Pillars</h2><div class="pillars"><div class="pillar"><div class="val pos">+2</div><div class="name">Trend</div><div class="det">MACD histogram crossing bullishly</div></div><div class="pillar"><div class="val zero">+0</div><div class="name">Momentum</div><div class="det">price reclaims EMA20 (closed below 2 bars ago)</div></div><div class="pillar"><div class="val pos">+1</div><div class="name">Macro</div><div class="det">Macro +1 Favorable; vol regime turbulent p=0.67 (below 0.8 cap)</div></div></div><div style="margin-top:12px"><span class="flag reb">▲ rebound — healthy EMA structure / EMA20 reclaim</span></div></div><div class="card"><h2>Risk (ATR / vol-target)</h2><div class="kv"><span class="k">Suggested stop</span><span>157.08 (1.91% away, ATR-based)</span></div><div class="kv"><span class="k">Vol-target size</span><span>100% of sleeve</span></div><div class="kv"><span class="k">Forecast vol (ann.)</span><span>10.8%</span></div><div class="kv"><span class="k">20d z-score</span><span>+1.48σ</span></div></div><div class="card"><h2>Macro Regime</h2><div class="kv"><span class="k">Regime</span><span>Broadening</span></div><div class="kv"><span class="k">Pillar</span><span>+1 · Favorable macro</span></div><div class="kv"><span class="k">Vol regime (GMM/HMM)</span><span>TURBULENT · p_turb 0.67</span></div></div><div class="card"><h2>Execution Plan</h2><div style="font-size:16px;font-weight:700;margin-bottom:8px">BUY 0 VYM — <span style="color:var(--green)">READY FOR REVIEW</span></div><div class="kv"><span class="k">Quote</span><span>160.59 / 160.60 · spread 0.6 bps · age 5.0s</span></div><div class="kv"><span class="k">Limit</span><span>160.59 · mid-point limit</span></div><div class="kv"><span class="k">Est. all-in cost</span><span>≤0.9 bps</span></div><table style="margin-top:10px"><tr><th>Check</th><th>Status</th><th>Detail</th></tr><tr><td>staleness</td><td class="chk-WARN">WARN</td><td>quote 5.0s old: refresh immediately before submit</td></tr><tr><td>spread</td><td class="chk-PASS">PASS</td><td>spread 0.6 bps</td></tr><tr><td>imbalance</td><td class="chk-SKIP">SKIP</td><td>no L1 sizes in quote</td></tr><tr><td>participation</td><td class="chk-SKIP">SKIP</td><td>no ADV provided</td></tr></table></div>
+<div class="approve">
+  <h2 style="color:var(--green)">Your decision</h2>
+  <div class="row">
+    <div><label>Side</label><input id="side" value="BUY" readonly></div>
+    <div><label>Symbol</label><input id="sym" value="VYM" readonly></div>
+    <div><label>Qty</label><input id="qty" type="number" min="0" step="1" value="0"></div>
+    <div><label>Limit</label><input id="limit" type="number" min="0" step="0.01" value="160.59"></div>
+  </div>
+  <div class="btnrow">
+    <button class="bapprove" id="btnA">✓ APPROVE</button>
+    <button class="breject" id="btnR">✗ REJECT</button>
+  </div>
+  <div id="out"><div id="outline"></div>
+    <div class="hint">Copied to clipboard. Paste this line back to Claude to proceed
+    (Claude runs review_*_order simulation first, then place_*_order only if it passes).</div>
+  </div>
+  <div class="hint">Token PROP-D295D3C6 · nothing executes until you paste an APPROVE line back to Claude.</div>
+</div>
+<script>
+(function(){
+  // Identity fields are fixed, server-sanitized constants — never read the
+  // raw DOM value for side/symbol (readonly). qty/limit are coerced numeric.
+  var TOK="PROP-D295D3C6", SIDE="BUY", SYM="VYM";
+  function emit(decision){
+    var qty=Math.max(0,Math.floor(Number(document.getElementById('qty').value)||0));
+    var ln=Number(document.getElementById('limit').value);
+    var lim=(isFinite(ln)&&ln>=0)?ln.toFixed(2):'0.00';
+    var line = decision==='APPROVE'
+      ? ('✅ APPROVE '+SIDE+' '+qty+' '+SYM+' @ limit '+lim+' [token '+TOK+']')
+      : ('❌ REJECT '+SYM+' [token '+TOK+']');
+    var o=document.getElementById('out');
+    document.getElementById('outline').textContent=line;
+    o.classList.add('show');
+    if(navigator.clipboard){ navigator.clipboard.writeText(line).catch(function(){}); }
+  }
+  document.getElementById('btnA').addEventListener('click',function(){emit('APPROVE');});
+  document.getElementById('btnR').addEventListener('click',function(){emit('REJECT');});
+})();
+</script><div class="footer">agentic-trading-desk · deterministic scripts, human-approved execution</div></body></html>

@@ -1,0 +1,72 @@
+[
+  {
+    "date": "2026-07-07",
+    "cycle_index": 0,
+    "day_in_cycle": 2,
+    "daily_budget_effective": null,
+    "source": "market_open_placement",
+    "strong_signal": false,
+    "spilled": 0,
+    "deploy_today_planned": 29.12,
+    "deploy_today_actual": 29.12,
+    "monthly_remaining_before": 500.0,
+    "invested_so_far": 0.0,
+    "note": "Pre-approved market-open DCA placement (migrated from prior object-shaped ledger).",
+    "orders": [
+      {
+        "symbol": "BA",
+        "side": "buy",
+        "type": "market",
+        "notional": 14.56,
+        "est_shares": 0.06283,
+        "est_price": 231.72,
+        "ref_id": "bf5cdb69-deed-4fa2-a071-81406436902b",
+        "order_id": "6a4d0c3c-c215-4514-b9a4-5db1044d18b2",
+        "state": "unconfirmed"
+      },
+      {
+        "symbol": "XOM",
+        "side": "buy",
+        "type": "market",
+        "notional": 14.56,
+        "est_shares": 0.10336,
+        "est_price": 140.86,
+        "ref_id": "6cc09d70-dfea-429f-9be6-5a56182dfabf",
+        "order_id": "6a4d0c43-c620-4f0f-b73f-6a77108ec90a",
+        "state": "unconfirmed"
+      }
+    ]
+  },
+  {
+    "date": "2026-07-07",
+    "cycle_index": 0,
+    "day_in_cycle": 2,
+    "daily_budget_effective": 100.0,
+    "source": "input",
+    "strong_signal": true,
+    "spilled": 100.0,
+    "deploy_today_planned": 200.01,
+    "deploy_today_actual": 0.0,
+    "monthly_remaining_before": 470.88,
+    "invested_so_far": 29.09,
+    "note": "Daily agentic loop. $100 input -> strong-signal spill 2x -> $200 planned. Approved: META $9.89 (token PROP-BA3AB018) - but regular-hours session closed (~4:09pm ET) before placement; dollar/fractional orders reject outside regular_hours, so DEFERRED to next regular open. All other names skipped (no approval). deploy_today_actual=0 (nothing filled).",
+    "approved_deferred": [
+      {"symbol": "META", "side": "buy", "type": "market", "dollar_amount": 9.89, "token": "PROP-BA3AB018", "reason_deferred": "regular_hours closed at approval time"}
+    ],
+    "rejected": [
+      {"symbol": "DJT", "side": "buy", "token": "PROP-32770247"},
+      {"symbol": "TSM", "side": "buy", "token": "PROP-8AFCD1E5"}
+    ],
+    "skipped_no_reply": ["XOM", "VONG", "VYM", "AMD", "BA"],
+    "planned_orders": [
+      {"symbol": "XOM", "side": "ADD", "notional": 50.00},
+      {"symbol": "VONG", "side": "BUY", "notional": 50.00},
+      {"symbol": "VYM", "side": "BUY", "notional": 50.00},
+      {"symbol": "AMD", "side": "BUY", "notional": 15.32},
+      {"symbol": "TSM", "side": "BUY", "notional": 13.10},
+      {"symbol": "DJT", "side": "BUY", "notional": 11.70},
+      {"symbol": "META", "side": "BUY", "notional": 9.89},
+      {"symbol": "BA", "side": "SELL", "notional": 14.56, "reason": "EXIT/TRIM - rotate to cash"}
+    ]
+  }
+]
