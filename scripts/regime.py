@@ -148,12 +148,49 @@ def hmm_smooth(r: list[float], gmm: dict, p_stay: float = 0.97) -> list[float]:
 # High-level API
 # --------------------------------------------------------------------------
 
+def _vol_shock(r: list[float], sigma_k: float, lookback: int) -> dict:
+    """Fast-path vol-acceleration detector.
+
+    The sticky HMM only flips on *persistent* evidence, so a single crash bar
+    (a >|sigma_k|σ downside return) does not move the smoothed posterior enough
+    to trip the macro-pillar cap on day one — exactly when risk is highest.
+    This measures the latest return against the trailing return distribution
+    (mean/σ of the prior `lookback` bars, EXCLUDING today so the shock doesn't
+    inflate its own denominator) and flags a downside shock at <= -sigma_k·σ.
+    """
+    out = {"shock": False, "shock_z": None, "latest_return": r[-1] if r else 0.0,
+           "shock_sigma": sigma_k}
+    if not sigma_k or len(r) < 3:
+        return out
+    base = r[:-1]
+    if lookback:
+        base = base[-lookback:]
+    if len(base) < 2:
+        return out
+    mu = sum(base) / len(base)
+    sd = (sum((x - mu) ** 2 for x in base) / (len(base) - 1)) ** 0.5
+    if sd <= 0:
+        return out
+    z = (r[-1] - mu) / sd
+    out["shock_z"] = z
+    out["shock"] = z <= -sigma_k       # downside acceleration only
+    return out
+
+
 def classify(close: list[float], min_bars: int = 120,
              p_stay: float = 0.97, threshold: float = 0.6,
-             max_bars: int = 750) -> Optional[dict]:
+             max_bars: int = 750, shock_sigma: float = 2.5,
+             shock_lookback: int = 60) -> Optional[dict]:
     """
-    Full pipeline: returns -> GMM fit -> HMM smoothing -> label.
+    Full pipeline: returns -> GMM fit -> HMM smoothing -> label, plus a
+    vol-acceleration override.
     `threshold`: smoothed P(turbulent) above which the state flips.
+    `shock_sigma`: latest return <= -shock_sigma·σ (trailing) forces the
+    EFFECTIVE state to turbulent *immediately*, without waiting for the sticky
+    HMM to accumulate evidence. Set 0 to disable. The raw HMM verdict is
+    preserved (`hmm_state`, `p_turbulent`) for transparency; `state_source`
+    says which path set the reported `state`.
+    `shock_lookback`: trailing window for the shock σ baseline (0 = full series).
     `max_bars`: cap the return window (default ~3y daily). This is a read of
     the *current* regime, so only the recent window matters; the cap keeps EM
     cost bounded (fit_gmm2 is O(n*iters) and dominates runtime) without
@@ -168,19 +205,35 @@ def classify(close: list[float], min_bars: int = 120,
     gmm = fit_gmm2(r)
     post = hmm_smooth(r, gmm, p_stay)
     p_turb = post[-1]
-    state = "turbulent" if p_turb >= threshold else "calm"
+    hmm_state = "turbulent" if p_turb >= threshold else "calm"
     # Persistence: bars since the smoothed posterior last crossed threshold
     bars_in_state = 0
     for p in reversed(post):
-        if (p >= threshold) == (state == "turbulent"):
+        if (p >= threshold) == (hmm_state == "turbulent"):
             bars_in_state += 1
         else:
             break
+
+    # Vol-acceleration override: a fresh downside shock forces turbulent NOW.
+    sk = _vol_shock(r, shock_sigma, shock_lookback)
+    if sk["shock"] and hmm_state != "turbulent":
+        state, state_source = "turbulent", "vol_shock"
+    else:
+        state = hmm_state
+        state_source = "vol_shock" if (sk["shock"] and hmm_state == "turbulent") \
+            else "hmm"
+
     ann = math.sqrt(252)
     return {
         "state": state,
+        "state_source": state_source,
+        "hmm_state": hmm_state,
         "p_turbulent": p_turb,
         "bars_in_state": bars_in_state,
+        "shock": sk["shock"],
+        "shock_z": sk["shock_z"],
+        "shock_sigma": shock_sigma,
+        "latest_return": sk["latest_return"],
         "calm_vol_annual": math.sqrt(gmm["vars"][0]) * ann,
         "turbulent_vol_annual": math.sqrt(gmm["vars"][1]) * ann,
         "calm_mean_annual": gmm["means"][0] * 252,
@@ -207,6 +260,10 @@ def main() -> int:
                     help="JSON: {'close':[...]} (e.g. SPY closes). No file: self-test.")
     ap.add_argument("--p-stay", type=float, default=0.97)
     ap.add_argument("--threshold", type=float, default=0.6)
+    ap.add_argument("--shock-sigma", type=float, default=2.5,
+                    help="downside return <= -k·σ forces turbulent (0=off)")
+    ap.add_argument("--shock-lookback", type=int, default=60,
+                    help="trailing window for the shock σ baseline (0=full)")
     args = ap.parse_args()
 
     if args.input:
@@ -227,7 +284,8 @@ def main() -> int:
             close.append(round(v, 2))
         print("[self-test: 200 calm bars + 60 turbulent bars]\n", file=sys.stderr)
 
-    res = classify(close, p_stay=args.p_stay, threshold=args.threshold)
+    res = classify(close, p_stay=args.p_stay, threshold=args.threshold,
+                   shock_sigma=args.shock_sigma, shock_lookback=args.shock_lookback)
     if res is None:
         print("insufficient data (need >=121 bars)", file=sys.stderr)
         return 1

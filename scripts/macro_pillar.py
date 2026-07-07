@@ -290,16 +290,31 @@ def score_macro(data: dict, fast: int = 50, slow: int = 200,
             stat_regime = {k: (round(v, 4) if isinstance(v, float) else v)
                            for k, v in stat_regime.items()
                            if k != "gmm_weights"}
-            # Turbulent state with high confidence caps the pillar at 0:
-            # ratio trends lag; the vol regime flips first.
-            if (stat_regime["state"] == "turbulent"
-                    and stat_regime["p_turbulent"] >= 0.8 and pillar > 0):
+            # Turbulent state caps the pillar at 0: ratio trends lag; the vol
+            # regime flips first. Two paths trip the cap —
+            #   (a) high-confidence SMOOTHED turbulent (p_turbulent >= 0.8), or
+            #   (b) a fresh vol-acceleration SHOCK (latest return <= -k·σ) that
+            #       forces the effective state to turbulent before the sticky
+            #       HMM has accumulated evidence (state_source == "vol_shock").
+            smoothed_turb = (stat_regime["state"] == "turbulent"
+                             and stat_regime.get("p_turbulent", 0) >= 0.8)
+            shock = bool(stat_regime.get("shock"))
+            if (smoothed_turb or shock) and pillar > 0:
                 pillar = 0
-                plabel = f"{plabel} (capped: turbulent vol regime)"
-                notes.append(
-                    "Pillar capped at 0: GMM/HMM detects turbulent volatility "
-                    f"regime on SPY (p={stat_regime['p_turbulent']:.2f}, "
-                    f"{stat_regime['bars_in_state']} bars).")
+                if shock and stat_regime.get("state_source") == "vol_shock":
+                    z = stat_regime.get("shock_z")
+                    plabel = f"{plabel} (capped: vol-shock override)"
+                    notes.append(
+                        "Pillar capped at 0: vol-acceleration override — latest "
+                        f"SPY return {z:.2f}σ below trend "
+                        f"(<= -{stat_regime.get('shock_sigma')}σ) forced an "
+                        "immediate turbulent downgrade ahead of the HMM.")
+                else:
+                    plabel = f"{plabel} (capped: turbulent vol regime)"
+                    notes.append(
+                        "Pillar capped at 0: GMM/HMM detects turbulent volatility "
+                        f"regime on SPY (p={stat_regime['p_turbulent']:.2f}, "
+                        f"{stat_regime['bars_in_state']} bars).")
 
     return MacroResult(
         as_of=data.get("as_of", ""),
@@ -334,11 +349,16 @@ def render(r: MacroResult) -> str:
                  f"{'  ⚠ inflationary flag' if r.inflationary_flag else ''}")
     if r.stat_regime:
         s = r.stat_regime
+        src = s.get("state_source")
+        tag = "  ⚡ VOL-SHOCK OVERRIDE" if src == "vol_shock" else ""
         L.append(f"Vol regime     : {s['state'].upper()}  "
                  f"p_turb={s['p_turbulent']:.2f}  "
                  f"({s['bars_in_state']} bars; "
                  f"σ calm {s['calm_vol_annual']*100:.0f}% / "
-                 f"turb {s['turbulent_vol_annual']*100:.0f}%)")
+                 f"turb {s['turbulent_vol_annual']*100:.0f}%){tag}")
+        if s.get("shock_z") is not None and s.get("shock"):
+            L.append(f"               : latest {s['shock_z']:+.2f}σ move "
+                     f"(<= -{s.get('shock_sigma')}σ shock trigger)")
     L.append("-" * 52)
     L.append("Components:")
     for c in r.components:
