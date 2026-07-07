@@ -287,10 +287,10 @@ def build_proposal(card: dict, plan: Optional[dict] = None,
 
     ev = card.get("event_risk")
     if ev:
-        du = ev.get("days_until")
+        du = int(_num(ev.get("days_until"), 0) or 0)
         when = "TODAY" if du == 0 else "tomorrow" if du == 1 else f"in {du} days"
         vf = "" if ev.get("verified") else " · tentative"
-        tm = (ev.get("timing") or "").upper()
+        tm = E((ev.get("timing") or "").upper())
         warn = ev.get("within_warn")
         bg, bd, ic = ("#3a2a10", "#b8860b", "⚠") if warn else ("#111725", "#2b3446", "🗓")
         note = (" — event risk the technical score can't price; size down or wait for the print"
@@ -437,8 +437,9 @@ def build_allocate(a: dict) -> str:
         paused = dly.get("earnings_paused") or []
         prow = ""
         if paused:
-            pd = ", ".join(f'{E(p.get("symbol",""))} ({p.get("earnings_days")}d)' for p in paused)
-            pdays = prm.get("earnings_pause_days", "?")
+            pd = ", ".join(f'{E(p.get("symbol",""))} ({int(_num(p.get("earnings_days"),0) or 0)}d)'
+                           for p in paused)
+            pdays = int(_num(prm.get("earnings_pause_days"), 0) or 0)
             prow = (f'<div class="kv"><span class="k">⚠ DCA paused (≤{pdays}d to earnings)</span>'
                     f'<span style="color:var(--amber)">{pd}</span></div>')
         B.append(f'<div class="card"><h2>Today\'s budget</h2>'
@@ -467,8 +468,8 @@ def build_allocate(a: dict) -> str:
         sc = int(_num(b.get("score"), 0) or 0)
         scc = "pos" if sc > 0 else "neg" if sc < 0 else "zero"
         ern = ""
-        edays = b.get("earnings_days")
-        if edays is not None:
+        if b.get("earnings_days") is not None:
+            edays = int(_num(b.get("earnings_days"), 0) or 0)
             if b.get("earnings_paused"):
                 ern = (f' <span class="badge" style="background:#3a2a10;color:#e0b34a">'
                        f'⚠ ERN {edays}d — DCA paused</span>')
@@ -647,7 +648,7 @@ def _brief_card(row: dict, accent: str) -> str:
         chips.append(f'<span class="chip">size {row["size_fraction"]*100:.0f}%</span>')
     ev = row.get("earnings")
     if ev:
-        du = ev.get("days_until")
+        du = int(_num(ev.get("days_until"), 0) or 0)
         warn = ev.get("within_warn")
         col = "var(--amber)" if warn else "var(--dim)"
         icon = "⚠" if warn else "🗓"
