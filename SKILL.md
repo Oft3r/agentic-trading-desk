@@ -275,12 +275,20 @@ order placement — also write the HTML into the repo and push it:
      in each filename: `briefing_top100_<TS>.html`, `briefing_firstlist_<TS>.html`,
      `agentic_book_<TS>.html` (+ any portfolio briefing). Keep prior runs — never
      overwrite; each run is a new timestamped file so intraday re-runs are diffable.
-  3. `git add briefings/ state/agentic_budget_log.json` then
-     `git commit -m "briefings: daily brief <YYYY-MM-DD> <TS>"` and
-     `git push origin <current-branch>`.
-  4. Surface the pushed GitHub URL(s) in the report so the user can open them
-     immediately. This commit is briefing artifacts only — it does NOT place any
-     order and does not depend on any approval.
+  3. **Also publish to GitHub Pages on `main`** so there is a stable rendered
+     URL: copy the same files into `docs/briefings/<YYYY-MM-DD>/` on the `main`
+     branch, regenerate `docs/index.html` (a landing page linking newest→oldest),
+     and keep `docs/.nojekyll` present so files serve as-is. Pages source is
+     `main` + `/docs`. Commit these on `main` and `git push origin main` — the
+     static HTML is self-contained and does not require the feature code, so it
+     lives on `main` independent of the daily ops branch.
+  4. `git add briefings/ state/agentic_budget_log.json` on the working branch,
+     `git commit -m "briefings: daily brief <YYYY-MM-DD> <TS>"`, push it; and
+     separately commit/push the `docs/` copy on `main`.
+  5. Surface both the repo URL and the **rendered Pages URL**
+     (`https://<user>.github.io/agentic-trading-desk/`) in the report so the user
+     can open them immediately. This is briefing artifacts only — it does NOT
+     place any order and does not depend on any approval.
 
 **Track the daily budget used.** Each run appends one entry to
 `state/agentic_budget_log.json` (a JSON list) from the book's `daily`/`cycle`
