@@ -1,1 +1,6 @@
 __pycache__/
+spy_raw_history_*.json
+spy_scored_bars_*.json
+*.bak.*
+.DS_Store
+eval_reports/

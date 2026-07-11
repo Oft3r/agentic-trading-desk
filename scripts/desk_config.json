@@ -1,0 +1,13 @@
+{
+  "_README": "Single source of truth for the Agentic Trading Desk risk parameters. run_desk.py reads this every run. The strategy evaluator (strategy_eval.py) writes PROPOSED changes to desk_config.proposed.json for your review — it NEVER edits this file. To ADOPT a proposal: review desk_config.proposed.json, then copy the value(s) you approve into 'risk_params' below. Bad/out-of-range values are ignored and safe defaults (stop 0.11 / arm 0.05 / giveback 0.03) apply. Values are fractions (0.11 = 11%).",
+  "risk_params": {
+    "stop_loss_pct": 0.11,
+    "trail_arm_pct": 0.05,
+    "trail_giveback_pct": 0.03
+  },
+  "strategy_mode": "regime_v4",
+  "regime_confirm_days": 3,
+  "_regime_confirm_help": "Anti-whipsaw: the regime gate flips only after N consecutive DAYS of the opposite signal (backtest 2014-26: N=3 → full-history Sharpe 0.84 vs 0.75, maxDD -20% vs -24%, trades 59→41 vs instant flip; N=3 and N=4 both validate out-of-sample, N>=5 overfits). 1 = flip immediately (old behavior). See experiments_v2.py.",
+  "_strategy_mode_help": "regime_v4 = validated trend-regime strategy (long while close>EMA200 & EMA200 rising, flat otherwise) + the risk overlay. three_pillar = the original counter-trend rebound engine. Backtest 2014-2026: regime_v4 TEST-slice Sharpe 0.96 / maxDD -10% vs three_pillar Sharpe 0.02 / maxDD -24% (it LOST money out-of-sample). See eval_reports/ and backtest.py. Switch back by setting three_pillar.",
+  "adopted_history": []
+}
