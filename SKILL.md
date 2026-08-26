@@ -35,33 +35,41 @@ Operations manual for short-term trading analysis and execution.
 The user authorizes executing orders without in-the-moment confirmation, **only** in the broker-designated agent-tradable account, and **only** within these limits. A limit exceeded is not a cue to ask for permission: it is a cue to **not trade** and report.
 
 **What I may execute**
-- Only decisions emitted by `score.py` in this same session, with the macro pillar computed by `macro_pillar.py` the same day. Zero discretion: if the script did not emit EXIT, EXIT / TRIM, RE-ENTRY (new cycle) or TACTICAL REBOUND (counter-trend), there is no trade. A hunch is not a trigger.
+- Decisions emitted by `score.py` in this same session, with the macro pillar computed by `macro_pillar.py` the same day. The scripts still run every session and their output is still the baseline — the framework is not optional.
+- **Discretionary entries and exits are authorized** (established by the user in a live session on 2026-08-26, superseding the prior zero-discretion rule): a trend change, a news catalyst, or a setup the decision cascade does not cover are all valid reasons to act. The cascade is rigid by design and will miss things; that is what this clause is for.
+- Every discretionary trade MUST carry its reasoning in writing in the session report — what I saw, why it justified acting, and what would prove me wrong. A trade I cannot explain in two sentences is a trade I should not have made.
 - **TACTICAL REBOUND goes in at half size** — it is counter-trend by definition.
+- Optional (Claude's suggestion, delete this line if unwanted): for a news-driven entry, require the tape to be moving in the direction of the thesis before acting rather than anticipating the move. Rationale in *External Context* below — in scheduled runs the news source is the weakest input available, and price confirmation is the cheapest guard against acting on a mis-dated headline.
 
 **Hard limits**
 - Max **$1,200** per order.
 - Max **3 new positions** per session. Exits are uncapped.
 - Minimum **15% of account value held in cash**. I never touch that reserve.
-- **Order types: `limit` and `market` are both allowed** (user decision, 2026-08-26). `stop_market` and `stop_limit` remain prohibited — an unattended stop has no price protection at all once it triggers.
-  - *Passive limit*: `limit_price` strictly inside the spread, within 0.3% of the last trade. Best price, may not fill.
-  - *Marketable limit*: cross the spread but keep a hard cap — buy at `min(ask, last x 1.003)`, sell at `max(bid, last x 0.997)`. Fills like a market order in regular hours while bounding the worst case. If the spread is wider than the 0.3% band the order may not fill; that is the design, not a bug.
-  - *Market*: fills at whatever the book gives. **Regular hours only** — the Robinhood MCP rejects `market` in `extended_hours` / `all_day_hours`, and a `market` order placed after the close as `regular_hours` silently queues to the next open and fills into that gap. Outside regular hours, market is not an option: use a limit or wait for the next session.
-  - Choosing between them: market when getting filled matters more than the price (a genuine EXIT on exhaustion, a rebound that is running away). Marketable limit when I want the speed but the book looks thin. Passive limit when there is no hurry. **Whichever I pick, I state which one and why in the run summary** — the user reviews fills at the end of the day and needs to see the reasoning, not just the fill.
-- **Quote staleness.** Before pricing any order I check `venue_bid_time` / `venue_ask_time` against the current time and confirm a recent trade print. If the top of book has not updated in **over 2 minutes** during regular hours, or there is no post-close print at all when the session is closed, the quote is stale: I do NOT price against it and I do not trade the name. (Verified 2026-08-26: after the close, IYT froze at 16:01 ET with no post-market prints while SPY/GLD/EEM kept updating tick by tick — a dead book in one name is invisible unless you compare it against a liquid one.)
-- **`dollar_amount` is allowed, but only where the schema allows it: `type=market` + `regular_hours`.** The server derives the share count from `last_trade_price`. Never pass it with a limit order — the call is rejected. To size a limit order in dollars, convert myself: `quantity = dollars / limit_price`, truncated to 6 decimals. Fractional limit orders ARE supported despite what the tool schema's fractional note implies (verified 2026-08-26 via `review_equity_order`: DIA buy limit `quantity=0.400000` @ 534.50, accepted with an empty `order_checks`) — but **only in regular hours**; fractional and dollar-based orders are rejected in every other session.
+- **Limit orders only.** Every order MUST carry `type: "limit"` and an explicit `limit_price` inside the spread, within 0.3% of the last trade. Never `market`, `stop_market` or `stop_limit`: nobody is watching the fill, and slippage on an unattended market order is invisible.
+- **Never pass `dollar_amount`.** The Robinhood MCP accepts `dollar_amount` *only* with `type=market`, so sizing an order in dollars silently forces a market order — this is how the rule above gets broken without anyone deciding to break it. Size in SHARES instead: `quantity = dollars / limit_price`, truncated to 6 decimals. Fractional limit orders ARE supported, despite what the tool schema's fractional note implies (verified 2026-08-26 via `review_equity_order`: DIA buy limit `quantity=0.400000` @ 534.50, accepted with an empty `order_checks`).
 - **Order preflight.** Before every `place_equity_order` I print this table and check every row. If any row fails, I do NOT place the order — I report instead.
 
   | field | value | check |
   |---|---|---|
-  | `type` | … | `limit` or `market` only — never `stop_market` / `stop_limit` |
-  | session | … | `market`, fractional and `dollar_amount` all require regular hours |
-  | quote age | … | top of book updated < 2 min ago; recent print exists |
-  | `limit_price` | … | limit orders only: within 0.3% of last trade (passive = inside spread; marketable = `min(ask, last x 1.003)` buy / `max(bid, last x 0.997)` sell) |
-  | spread | `(ask − bid) / last` | if > 1% on a `market` order, downgrade to marketable limit and say so — a market order into a pathological book is the one case with no floor |
-  | size | `quantity` or `dollar_amount` | exactly one of the two |
-  | notional | `quantity × price` or `dollar_amount` | ≤ $1,200 |
+  | `type` | … | must be exactly `limit` |
+  | `limit_price` | … | inside the spread, within 0.3% of last trade |
+  | `quantity` | … | shares — never `dollar_amount` |
+  | notional | `quantity × limit_price` | ≤ $1,200 |
+- **The guard is not load-bearing unless `jq` is installed.** The hook implements every rule with `jq`; without it the script exits 0 with no output and the runner reads that as ALLOW (verified 2026-08-26 — the pre-fix revision let a `stop_market` through). It now fails closed, but a guard that denies everything is not a working setup either. See *Session start — prove the guard is alive* below; either way I treat the preflight table above as the real check, not the hook.
 - No new position in a single name within 2 sessions of confirmed earnings (`get_earnings_calendar`). ETFs exempt.
 - I run `review_equity_order` before every `place_equity_order`. If the simulation differs by more than 1% in price or quantity from what I computed, **I abort and report**.
+
+**Session start — prove the guard is alive**
+
+The Mandate is prose, and prose cannot enforce itself; `hooks/mandate-order-guard.sh` is what makes "limit orders only" mechanical. The failure mode that matters is that a guard which is unwired, non-executable, or missing `jq` looks exactly like a working one until an order slips through. That is not hypothetical: on 2026-08-26 a `stop_market` passed because `jq` was absent and the script exited 0 with no output, which the hook runner reads as ALLOW. So before the first `place_equity_order` of any session I run:
+
+```bash
+bash <skill-dir>/scripts/session-setup.sh
+```
+
+It installs `jq`, marks the guard executable, and feeds the guard a `stop_market` probe. Exit 0 with `order guard verified` means the guard is actually evaluating rules. **Any other outcome means it is not, and I do not execute orders that session** — I still run the analysis and report what the framework emitted, and I say plainly that execution was disabled and why. Analysis with a broken guard is useful; unattended execution with one is not.
+
+One thing to be honest about with myself: `.claude/settings.json` only loads for a session whose *project directory* contains it. When the desk is loaded as an installed skill rather than opened as a project, the `PreToolUse` hook never registers, and the probe above verifies only that the script would deny if it were called. In that mode nothing outside me is checking, so the preflight table is the entire safety margin — I fill it in row by row before every order and abort on any failing row, rather than treating it as paperwork.
 
 **Circuit breakers**
 - If account value at session open is down **more than 4%** against the prior close: no new buys that day. Exits remain allowed.
@@ -81,7 +89,9 @@ The user authorizes executing orders without in-the-moment confirmation, **only*
 
 Load the tools with `tool_search` before using them (they are deferred).
 
-**Session self-audit (first call of every run).** `get_equity_orders` on the agent-tradable account with `placed_agent="agentic"` since the previous session. A Mandate breach by a prior run is: a `stop_market` / `stop_limit` order, a notional above $1,200, a trade in a non-agent-tradable account, or an average fill more than 1% away from the last trade at the time of placement (the slippage a market order can hide). I surface any of these in the push notification rather than letting it pass silently. `market` and `dollar_amount` orders are NOT breaches as of 2026-08-26 — but I still report the realized slippage on every market fill, because that is the cost the user accepted when he enabled them, and he can only judge it if he sees it. The broker's order history is the only durable record — the execution container is ephemeral, so a breach that is not surfaced today is lost.
+**Guard verification runs before any of this** — see *Session start — prove the guard is alive* in the Mandate. No order goes out in a session where the probe did not come back denied.
+
+**Session self-audit (first call of every run).** `get_equity_orders` on the agent-tradable account with `placed_agent="agentic"` since the previous session. Any order whose `type` is not `limit`, or that carries a `dollar_amount`, is a Mandate breach by a prior run: I surface it in the push notification rather than letting it pass silently. The broker's order history is the only durable record — the execution container is ephemeral, so a breach that is not surfaced today is lost.
 
 **To analyze a ticker:**
 1. `Robinhood:get_equity_historicals` → ~290 daily bars (closes). This is the input for `indicators.py`. Request a range that yields ≥220 bars (ideal for EMA200).
