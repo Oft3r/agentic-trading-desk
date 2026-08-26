@@ -18,9 +18,10 @@ graph TD
     B -- JSON of Closes + Holding status --> E[scripts/score.py]
     D -- Injected Macro Score --> E
     E -- Raw Indicators --> F[scripts/indicators.py]
-    E -- Three-Pillar Scorecard + Suggested Decision --> B
-    B -- Visualized Proposal --> G[User]
-    G -- Order Confirmation --> A
+    E -- Three-Pillar Scorecard + Decision --> B
+    B -- Limit Order within Mandate limits --> A
+    B -- Push Notification per fill + run summary --> G[User]
+    G -- Sets the Mandate limits, reviews results --> B
 ```
 
 ### File Structure
@@ -154,7 +155,7 @@ Once loaded, Claude Code will:
 * Fetch data via Robinhood MCP protocol
 * Call the Python scripts (`scripts/indicators.py`, `scripts/score.py`, `scripts/macro_pillar.py`) for deterministic calculations
 * Present the three-pillar scorecard with actionable decisions
-* **Never execute orders without your explicit confirmation**
+* **Execute autonomously in the Agentic account under the Autonomous Execution Mandate** — limit orders only, within hard caps on order size, new positions per session, and cash reserve. See the Mandate section in [SKILL.md](SKILL.md) for the exact limits, and set them to your own risk tolerance before enabling.
 
 ### 3. Example Workflow
 ```
@@ -179,12 +180,14 @@ You: "Analyze AAPL for a potential entry"
    → News and macro context from Investing.com
    → Analyst consensus and price targets from Google Finance
 
-5. Presentation and Confirmation
-   → Returns: Scorecard, flags, and suggested action (RE-ENTRY, HOLD, EXIT, etc.)
-   → You review and confirm before any order execution
+5. Execution and Reporting
+   → Returns: Scorecard, flags, and action (RE-ENTRY, HOLD, EXIT, etc.)
+   → If the action is executable and inside the Mandate limits: review_*_order,
+     then place_*_order as a limit order, then a push notification
+   → If it falls outside the limits: no trade, and the reason is reported
 ```
 
-The agent operates under the principle: **AI fetches data and presents analysis; scripts perform deterministic calculations; you decide and approve all executions.**
+The agent operates under the principle: **AI fetches data; scripts perform deterministic calculations; the framework decides and the agent executes within limits you set in advance.** Discretion is deliberately absent — if `score.py` did not emit an executable decision, there is no trade.
 
 ---
 
@@ -206,8 +209,10 @@ To complement the purely technical nature of the deterministic scripts, the AI a
 ## 🛡️ Guardrails and Operation (Non-Negotiable)
 
 1.  **Special Position Protection**: Certain positions can be designated as *protected* (e.g., restricted stock grants). Protected tickers are never evaluated for selling or trimming in exit suggestions.
-2.  **Account Segregation**:
-    *   **Agentic** (Cash Account): Oriented toward fast returns and capital rotation via tactical trades and defined cycles.
-    *   **Individual** (Margin Account): Core passive long-term investing.
-3.  **T+1 Liquidity**: In the cash account, only settled capital counts as buying power before placing buy orders.
-4.  **Mandatory Confirmation**: Every order proposed by the bot must pass through a simulation check with `review_*_order` and be approved by the user before executing `place_*_order`.
+2.  **Account Segregation**: The tradable account is identified by the broker's own agent-tradable flag from `get_accounts` — never by nickname, never by a hardcoded account number. Orders against any other account are rejected by the broker.
+    *   **Agentic**: Oriented toward fast returns and capital rotation via tactical trades and defined cycles. The only account the Mandate covers.
+    *   **Individual** (Margin Account): Core passive long-term investing. Analysis only.
+3.  **Buying Power**: Always taken from `get_portfolio.buying_power` rather than derived. Account type matters and can change: a cash account settles T+1, while a limited-margin account can trade unsettled proceeds immediately.
+4.  **Mandatory Simulation**: Every order passes through `review_*_order` before `place_*_order`. If the simulation disagrees with the computed order by more than 1% on price or quantity, the trade is aborted and reported.
+5.  **Mandate Limits Are Hard**: A limit exceeded is not a prompt to ask for permission — it is a stop. The agent does not trade and reports why. Circuit breakers halt new buys if the account is down more than 4% on the day, or if the data does not reconcile.
+6.  **No Backtest**: This framework has not been backtested. A trigger firing does not make it correct. Set the Mandate limits to a size where being wrong is survivable.
