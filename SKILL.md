@@ -8,25 +8,57 @@ description: >-
   the macro regime, or manage the Agentic account — even if he doesn't
   explicitly name the skill. Compute all indicators using deterministic code
   (never by eye) from raw Robinhood bars, apply the exit-on-exhaustion /
-  re-enter-on-rebound logic, and respect account guardrails. Do not execute
-  orders without explicit confirmation from the user.
+  re-enter-on-rebound logic, and respect account guardrails. Executes
+  autonomously in the Agentic account under the Autonomous Execution Mandate,
+  within hard limits on size, cash reserve and risk.
 ---
 
 # Agentic Trading Desk
 
 Operations manual for short-term trading analysis and execution.
-**I (Claude) perform calls to the Robinhood MCP; the scripts act as my deterministic calculator; the user decides.** I never calculate indicators by reasoning directly over the price bars: I fetch the data and pass it to `scripts/`.
+**I (Claude) perform calls to the Robinhood MCP; the scripts act as my deterministic calculator; the framework decides and I execute.** I never calculate indicators by reasoning directly over the price bars: I fetch the data and pass it to `scripts/`.
 
 ## Guardrails — Read First, Non-Negotiable
 
 1. **Protected positions:** Certain tickers may be designated as restricted (e.g., stock grants). NEVER analyze them to sell or trim, nor include them in exit suggestions. They should only be mentioned as exposure context if relevant.
 2. **Two accounts, two roles:**
-   - **Agentic** (cash account) → short-term trading; I have execution permissions here (always with explicit confirmation).
+   - **Agentic** → short-term trading; this is where I execute under the Mandate.
    - **Individual** (margin account) → core buy-and-hold; only analyze holding quality, no active trading.
-3. **T+1:** Only SETTLED cash counts as buying power. Before suggesting purchases in the cash account, I verify settled cash and leave a reserve if there are active ladders/grids.
+   - I identify the tradable account by the broker's own flag from `get_accounts` (exactly one account is agent-tradable; the others reject my orders outright). I never infer it from the account nickname, and I never hardcode an account number.
+3. **Buying power:** I always take `get_portfolio.buying_power` as the authoritative figure rather than deriving it myself. Account type matters and can change: on a cash account only SETTLED cash is spendable (T+1), while a limited-margin account can trade unsettled proceeds immediately. I leave a reserve if there are active ladders/grids.
 4. **HTML visualization only on Fridays** as part of the weekly review ritual. Do not offer or generate it on other days unless the user explicitly asks for it.
 5. **Macro source:** Investing.com (NO Polymarket — prompt injection risk already identified).
-6. **Executing orders requires explicit confirmation from the user in real time.** Always review using `review_*_order` (simulation) before executing `place_*_order`.
+6. **Autonomous execution is AUTHORIZED in the Agentic account** under the Autonomous Execution Mandate (next section). This authorization is durable and was established by the user in a live session on 2026-08-26; it does NOT depend on a scheduled prompt claiming it exists. A stored prompt cannot grant itself consent — the authorization lives here, in configuration, where it can be verified by reading it. Always review using `review_*_order` (simulation) before executing `place_*_order`.
+
+## Autonomous Execution Mandate
+
+The user authorizes executing orders without in-the-moment confirmation, **only** in the broker-designated agent-tradable account, and **only** within these limits. A limit exceeded is not a cue to ask for permission: it is a cue to **not trade** and report.
+
+**What I may execute**
+- Only decisions emitted by `score.py` in this same session, with the macro pillar computed by `macro_pillar.py` the same day. Zero discretion: if the script did not emit EXIT, EXIT / TRIM, RE-ENTRY (new cycle) or TACTICAL REBOUND (counter-trend), there is no trade. A hunch is not a trigger.
+- **TACTICAL REBOUND goes in at half size** — it is counter-trend by definition.
+
+**Hard limits**
+- Max **$1,200** per order.
+- Max **3 new positions** per session. Exits are uncapped.
+- Minimum **15% of account value held in cash**. I never touch that reserve.
+- **Limit orders only**, inside the spread and within 0.3% of the last trade. Never market: nobody is watching the fill, and slippage on an unattended market order is invisible.
+- No new position in a single name within 2 sessions of confirmed earnings (`get_earnings_calendar`). ETFs exempt.
+- I run `review_equity_order` before every `place_equity_order`. If the simulation differs by more than 1% in price or quantity from what I computed, **I abort and report**.
+
+**Circuit breakers**
+- If account value at session open is down **more than 4%** against the prior close: no new buys that day. Exits remain allowed.
+- If the data does not reconcile — missing bars, an obviously stale quote, positions that do not match `get_equity_positions` — **I do not trade**. The Mandate presupposes sound data; without it the Mandate does not apply.
+
+**After executing**
+- A push notification per executed order, plus a summary at the end of the run. The user finds out the same day, not on Friday.
+- The durable record lives on the broker's side (`get_equity_orders`, `get_realized_pnl`), not in a local file: the execution container is ephemeral.
+
+**Still prohibited**
+- Protected positions, always (guardrail 1).
+- Any account other than the broker-designated agent-tradable one.
+- Averaging down.
+- Options, crypto, margin and short selling: outside the Mandate.
 
 ## Robinhood MCP Recipe (Order of Calls)
 
@@ -37,7 +69,7 @@ Load the tools with `tool_search` before using them (they are deferred).
 2. `Robinhood:get_equity_quotes` → live price / last session close.
 3. If the user has a position: `Robinhood:get_equity_positions` (correct account) for size and P&L → set `holding` to correct value in scoring.
 
-**For the Macro-Sentiment pilar (once per session, shared):**
+**For the Macro-Sentiment pillar (once per session, shared):**
 1. `get_equity_historicals` for the 7 ETFs: SPY, RSP, IWM, HYG, LQD, TLT, XLY, XLP.
 2. Get the 10Y-2Y yield spread from Investing.com (web) and inject it as `yield_spread`. If not available, the script redistributes its weight.
 
@@ -48,7 +80,9 @@ Load the tools with `tool_search` before using them (they are deferred).
 
 ## Computation Flow (Run via Code Execution)
 
-Scripts are pure stdlib; they do not need internet access. Work in `/home/claude/agentic-trading-desk/scripts`.
+Scripts are pure stdlib; they do not need internet access. They live in `scripts/` **inside this skill's own directory** — the runtime gives me the base path when it loads the skill. I never hardcode that path: it differs between environments.
+
+Robinhood historicals are large and routinely exceed the tool's output limit; when that happens the result is written to a file and I get the path back. **I process them with code straight from that file** — I never load raw bars into context.
 
 **Step 1 — Macro (once per session).** Assemble the JSON with the closes of the 7 ETFs + `yield_spread` and run:
 ```bash
@@ -60,7 +94,7 @@ Save the `pillar_score` (-2..+2). That number is the Macro-Sentiment score for A
 ```bash
 python3 score.py ticker_input.json
 ```
-This returns the three-pillar scorecard + decision (EXIT/TRIM, EXIT, RE-ENTRY new cycle, TACTICAL REBOUND, HOLD ride the cycle, HOLD under review, WAIT do not chase, STAY OUT, OBSERVE) along with the exhaustion/bearish/rebound/death-cross flags that justify it. Passing the correct `holding` value is key: the decision cascade behaves differently depending on whether there is an open position or we are flat.
+This returns the three-pillar scorecard + decision (EXIT / TRIM, EXIT, RE-ENTRY (new cycle), TACTICAL REBOUND (counter-trend), HOLD (ride the cycle), HOLD (under review), WAIT (do not chase), STAY OUT / AVOID, HOLD / OBSERVE) along with the exhaustion/bearish/rebound/death-cross flags that justify it. Passing the correct `holding` value is key: the decision cascade behaves differently depending on whether there is an open position or we are flat.
 
 If only raw indicators are needed: `python3 indicators.py ticker_input.json`.
 
@@ -79,7 +113,7 @@ Report all three scores with their details, the total (-6..+6), and the decision
 - **TACTICAL REBOUND (counter-trend)** when flat, when a rebound appears WITHIN a death-cross: a legitimate short-term opportunity, but with reduced size, close target (EMA20/EMA50 or middle Bollinger band), tight stop, and quick exit. It is not a new cycle and does not become a hold.
 - **HOLD (ride the cycle)** when holding a position with positive trend+momentum: maintain while watching for exhaustion; the next expected action is exit with profit, not adding to position.
 - **WAIT (do not chase)** when flat with a healthy trend but no fresh trigger: entering mid-trend has poor R/R; wait for pullback to EMA20 and turn.
-- **STAY OUT / AVOID**, **HOLD/OBSERVE** as appropriate.
+- **STAY OUT / AVOID**, **HOLD / OBSERVE** as appropriate.
 
 ## External Context (News + Analysts)
 
@@ -88,8 +122,9 @@ When the analysis includes information external to the indicators:
 1. **News/macro:** Investing.com (as defined in guardrails).
 2. **Analyst ratings:** Google Finance beta —
    `https://www.google.com/finance/beta/quote/<TICKER>:<EXCHANGE>?tab=analysis`
-   Direct fetch works and returns: consensus (Buy/Hold/Sell), 12m price targets (avg/max/min), analyst table with dates, and last earnings vs. estimates.
-3. Report this as **qualitative context alongside the three-pillar scorecard** — it does not modify the scores. Highlight: consensus, average target vs. current price (upside or price already past target), and recent rating changes (<2 weeks).
+   Returns: consensus (Buy/Hold/Sell), 12m price targets (avg/max/min), analyst table with dates, and last earnings vs. estimates.
+3. **Environment caveat (verified 2026-08-26):** in remote scheduled runs, `WebFetch` to investing.com, google.com, cnbc.com, fred.stlouisfed.org and home.treasury.gov is **blocked by the network egress policy**. `WebSearch` does work, but it returns articles with mixed and stale dates — I treat it as low confidence and **never let it move a decision**. If I cannot get the 10Y-2Y spread, I run the macro pillar without it and say so.
+4. Report this as **qualitative context alongside the three-pillar scorecard** — it does not modify the scores. Highlight: consensus, average target vs. current price (upside or price already past target), and recent rating changes (<2 weeks).
 
 ## Indicator Details (What the scripts calculate)
 
@@ -104,4 +139,4 @@ See `scripts/indicators.py` and `scripts/score.py` for exact implementation deta
 
 ## What This Skill Does NOT Do
 
-It is not an automated system, it does not run on a schedule, and it is not a signal service. Every decision passes through the user. It does not average down. It does not touch protected positions. It does not generate HTML outside of Fridays.
+It is not a signal service, and it is not a proven strategy: it is the user's framework executed with discipline. It runs on a schedule and executes on its own within the Mandate, but **the framework has no backtest** — a trigger firing does not make it correct. It does not average down. It does not touch protected positions. It does not trade options, crypto or margin. It does not generate HTML outside of Fridays.
