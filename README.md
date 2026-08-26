@@ -19,7 +19,7 @@ graph TD
     D -- Injected Macro Score --> E
     E -- Raw Indicators --> F[scripts/indicators.py]
     E -- Three-Pillar Scorecard + Decision --> B
-    B -- Limit Order within Mandate limits --> A
+    B -- Order within Mandate limits --> A
     B -- Push Notification per fill + run summary --> G[User]
     G -- Sets the Mandate limits, reviews results --> B
 ```
@@ -155,7 +155,7 @@ Once loaded, Claude Code will:
 * Fetch data via Robinhood MCP protocol
 * Call the Python scripts (`scripts/indicators.py`, `scripts/score.py`, `scripts/macro_pillar.py`) for deterministic calculations
 * Present the three-pillar scorecard with actionable decisions
-* **Execute autonomously in the Agentic account under the Autonomous Execution Mandate** — limit orders only, within hard caps on order size, new positions per session, and cash reserve. See the Mandate section in [SKILL.md](SKILL.md) for the exact limits, and set them to your own risk tolerance before enabling.
+* **Execute autonomously in the Agentic account under the Autonomous Execution Mandate** — limit or market orders, within hard caps on order size, new positions per session, and cash reserve. See the Mandate section in [SKILL.md](SKILL.md) for the exact limits, and set them to your own risk tolerance before enabling.
 
 ### 3. Example Workflow
 ```
@@ -216,3 +216,49 @@ To complement the purely technical nature of the deterministic scripts, the AI a
 4.  **Mandatory Simulation**: Every order passes through `review_*_order` before `place_*_order`. If the simulation disagrees with the computed order by more than 1% on price or quantity, the trade is aborted and reported.
 5.  **Mandate Limits Are Hard**: A limit exceeded is not a prompt to ask for permission — it is a stop. The agent does not trade and reports why. Circuit breakers halt new buys if the account is down more than 4% on the day, or if the data does not reconcile.
 6.  **No Backtest**: This framework has not been backtested. A trigger firing does not make it correct. Set the Mandate limits to a size where being wrong is survivable.
+
+---
+
+## 🔒 Enforcing the Mandate (`hooks/mandate-order-guard.sh`)
+
+The Mandate's order rules are **prose addressed to the model** — nothing enforces them, and in practice they have been broken. As of 2026-08-26 `market` orders and `dollar_amount` sizing are permitted by user decision; what still must not get through is a stop order or an oversized one, and those need enforcement outside the model just as much.
+
+The break is not carelessness; it is structural. The Robinhood MCP schema states:
+
+> `dollar_amount`: USD notional. **Only valid with `type=market`.**
+
+So any run that sizes an order in dollars — the natural way to think about a small account — is pushed by the schema itself into a market order. That is now an allowed outcome rather than a trap, but the coupling is still worth knowing: `dollar_amount` implies `market`, and `market` implies regular hours. The schema further implies fractional shares require `type=market`. **That part is wrong**: a fractional *limit* order is accepted (verified via `review_equity_order`: DIA buy limit `quantity=0.400000` @ 534.50, empty `order_checks`). To size a limit order in dollars: `quantity = dollars / limit_price`.
+
+`hooks/mandate-order-guard.sh` is a `PreToolUse` hook that closes this deterministically. It runs in the harness, outside the model, and denies the tool call before it leaves:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "mcp__Robinhood__place_equity_order",
+        "hooks": [
+          { "type": "command", "command": "~/.claude/hooks/mandate-order-guard.sh", "timeout": 10 }
+        ]
+      }
+    ]
+  }
+}
+```
+
+| Order | Guard |
+|---|---|
+| `market` + `dollar_amount` | ALLOW (regular hours only) |
+| `market` with quantity | ALLOW (regular hours only) |
+| `stop_market` / `stop_limit` | DENY — no price protection once triggered |
+| `limit` without `limit_price` | DENY |
+| `limit` + `dollar_amount` | DENY — the MCP rejects the pair |
+| any order with notional > $1,200 | DENY — per-order ceiling |
+| `limit` + `limit_price`, fractional or whole | ALLOW |
+
+**Where to install it so it survives.** The scheduled-run container is ephemeral — a hook written inside a session is gone by the next one.
+
+*   **Local runs**: copy the script to `~/.claude/hooks/` and merge the `hooks` block into `~/.claude/settings.json`.
+*   **Cloud scheduled runs**: the container boots clean each time, so the environment's **setup script** must reinstall both on every boot. See https://code.claude.com/docs/en/claude-code-on-the-web
+
+Without one of those, only the SKILL.md rule applies — which is what already proved insufficient.
