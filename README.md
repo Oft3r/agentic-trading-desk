@@ -12,7 +12,7 @@ The project is designed to operate locally and modularly. All technical indicato
 
 ```mermaid
 graph TD
-    A[Robinhood MCP / API] -- Price Historicals / Quotes --> B[Claude / Agentic Core]
+    A[Robinhood MCP / API] -- Price Historicals / Quotes --> B[Agent / Agentic Core]
     C[Investing.com / Web] -- 10Y-2Y Spread / News --> B
     B -- JSON of Daily Closes --> D[scripts/macro_pillar.py]
     B -- JSON of Closes + Holding status --> E[scripts/score.py]
@@ -126,7 +126,7 @@ The output includes the three-pillar scorecard, active flags (exhaustion / beari
 | `EXIT / TRIM` | Holding — bullish momentum exhausted |
 | `EXIT` | Holding — bearish momentum relentless |
 | `RE-ENTRY (new cycle)` | Flat — rebound with healthy EMA structure |
-| `TACTICAL REBOUND (counter-trend)` | Flat — rebound inside a death-cross (reduced size, tight stop) |
+| `TACTICAL REBOUND (counter-trend)` | Flat — rebound inside a death-cross (reduced size, conditional exit on close) |
 | `HOLD (ride the cycle)` | Holding — trend and momentum positive |
 | `HOLD (under review)` | Holding — weak signals, no full exit trigger yet |
 | `WAIT (do not chase)` | Flat — healthy trend but no fresh entry trigger |

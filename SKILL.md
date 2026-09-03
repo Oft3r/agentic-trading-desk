@@ -27,7 +27,7 @@ Operations manual for short-term trading analysis and execution.
    - I identify the tradable account by the broker's own flag from `get_accounts` (exactly one account is agent-tradable; the others reject my orders outright). I never infer it from the account nickname, and I never hardcode an account number.
 3. **Buying power:** I always take `get_portfolio.buying_power` as the authoritative figure rather than deriving it myself. Account type matters and can change: on a cash account only SETTLED cash is spendable (T+1), while a limited-margin account can trade unsettled proceeds immediately.
 4. **HTML visualization only on Fridays** as part of the weekly review ritual. Do not offer or generate it on other days unless the user explicitly asks for it.
-5. **Macro source (optional / best-effort):** Investing.com (NO Polymarket — prompt injection risk already identified). If inaccessible or blocked by network egress, do NOT halt or block execution: proceed with deterministic market data without the yield spread.
+5. **Macro source (optional / best-effort):** Investing.com (NO Polymarket). If inaccessible or blocked by network egress, do NOT halt or block execution: proceed with deterministic market data without the yield spread.
 6. **Autonomous execution is AUTHORIZED in the Agentic account** under the Autonomous Execution Mandate (next section). This authorization is durable and was established by the user in a live session on 2026-08-26; it does NOT depend on a scheduled prompt claiming it exists. A stored prompt cannot grant itself consent — the authorization lives here, in configuration, where it can be verified by reading it. Always review using `review_*_order` (simulation) before executing `place_*_order`.
 
 ## Autonomous Execution Mandate
@@ -39,7 +39,7 @@ The user authorizes executing orders without in-the-moment confirmation, **only*
 - **Discretionary entries and exits are authorized** (established by the user in a live session on 2026-08-26, superseding the prior zero-discretion rule): a trend change, a news catalyst, or a setup the decision cascade does not cover are all valid reasons to act. The cascade is rigid by design and will miss things; that is what this clause is for.
 - Every discretionary trade MUST carry its reasoning in writing in the session report — what I saw, why it justified acting, and what would prove me wrong. A trade I cannot explain in two sentences is a trade I should not have made.
 - **TACTICAL REBOUND goes in at half size** — it is counter-trend by definition.
-- Optional (Claude's suggestion, delete this line if unwanted): for a news-driven entry, require the tape to be moving in the direction of the thesis before acting rather than anticipating the move. Rationale in *External Context* below — in scheduled runs the news source is the weakest input available, and price confirmation is the cheapest guard against acting on a mis-dated headline.
+- Optional: for a news-driven entry, require the tape to be moving in the direction of the thesis before acting rather than anticipating the move. Rationale in *External Context* below — in scheduled runs the news source is the weakest input available, and price confirmation is the cheapest guard against acting on a mis-dated headline.
 
 **Hard limits**
 - Max **$1,200** per order.
@@ -125,17 +125,17 @@ Robinhood historicals are large and routinely exceed the tool's output limit; wh
 
 **Step 1 — Macro (once per session).** The input schema is `{"as_of": "YYYY-MM-DD", "series": {"SPY": [...], "RSP": [...], …}, "yield_spread": <float, optional>}`. The closes go **nested under `series`**, not at the top level — a flat `{"SPY": [...]}` raises `ValueError: No components with sufficient data`. Then run:
 ```bash
-python3 macro_pillar.py macro_input.json --json
+python3 scripts/macro_pillar.py macro_input.json --json
 ```
 Save the `pillar_score` (-2..+2). That number is the Macro-Sentiment score for ALL tickers today.
 
 **Step 2 — Per ticker.** Assemble `{symbol, close:[...], macro_score, holding}` and run:
 ```bash
-python3 score.py ticker_input.json
+python3 scripts/score.py ticker_input.json
 ```
-This returns the three-pillar scorecard + decision (EXIT / TRIM, EXIT, RE-ENTRY (new cycle), TACTICAL REBOUND (counter-trend), HOLD (ride the cycle), HOLD (under review), WAIT (do not chase), STAY OUT / AVOID, HOLD / OBSERVE) along with the exhaustion/bearish/rebound/death-cross flags that justify it. Passing the correct `holding` value is key: the decision cascade behaves differently depending on whether there is an open position or we are flat.
+This returns the three-pillar scorecard + decision (EXIT / TRIM, EXIT, RE-ENTRY (new cycle), TACTICAL REBOUND (counter-trend), HOLD (ride the cycle), HOLD (under review), WAIT (do not chase), STAY OUT / AVOID, HOLD / OBSERVE, OBSERVE) along with the exhaustion/bearish/rebound/death-cross flags that justify it. Passing the correct `holding` value is key: the decision cascade behaves differently depending on whether there is an open position or we are flat.
 
-If only raw indicators are needed: `python3 indicators.py ticker_input.json`.
+If only raw indicators are needed: `python3 scripts/indicators.py ticker_input.json`.
 
 ## Three-Pillar Framework (Standard Output Format)
 
@@ -151,8 +151,9 @@ Report all three scores with their details, the total (-6..+6), and the decision
 - **RE-ENTRY (new cycle)** when flat, when a rebound/reversal arrives with a healthy EMA structure: valid entry trigger, confirm with candle/volume.
 - **TACTICAL REBOUND (counter-trend)** when flat, when a rebound appears WITHIN a death-cross: a legitimate short-term opportunity, but with reduced size, close target (EMA20/EMA50 or middle Bollinger band), conditional exit on the next session / daily close if the rebound falters (since server-side stop orders are prohibited), and quick exit. It is not a new cycle and does not become a hold.
 - **HOLD (ride the cycle)** when holding a position with positive trend+momentum: maintain while watching for exhaustion; the next expected action is exit with profit, not adding to position.
+- **HOLD (under review)** when holding a position with weak structure or momentum, but no full exit trigger yet: maintain while monitoring for further deterioration.
 - **WAIT (do not chase)** when flat with a healthy trend but no fresh trigger: entering mid-trend has poor R/R; wait for pullback to EMA20 and turn.
-- **STAY OUT / AVOID**, **HOLD / OBSERVE** as appropriate.
+- **STAY OUT / AVOID**, **HOLD / OBSERVE** (when holding) or **OBSERVE** (when flat) as appropriate.
 
 ## External Context (News + Analysts — Non-Blocking / Optional)
 

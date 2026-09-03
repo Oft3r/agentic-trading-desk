@@ -142,7 +142,7 @@ def decide(ind: dict, trend: int, mom: int, macro: Optional[int],
     via capital rotation. The cycle is enter on rebound → ride → exit on
     exhaustion → wait for next trigger. Accumulating positions is not the default
     (keeps capital trapped). A rebound inside a death-cross is a counter-trend
-    TACTICAL opportunity (reduced size, tight stop), not a new cycle.
+    TACTICAL opportunity (reduced size, conditional stop on close), not a new cycle.
     """
     f = _flags(ind)
     n_exh, n_bear, n_reb = len(f["exhaustion"]), len(f["bearish"]), len(f["rebound"])
@@ -174,7 +174,7 @@ def decide(ind: dict, trend: int, mom: int, macro: Optional[int],
         action = "TACTICAL REBOUND (counter-trend)"
         rationale = "Rebound signals within a death-cross: tactical trade, NOT a new cycle."
         framing = ("Short-term opportunity against the structure: reduced size, "
-                   "close target (EMA20/EMA50 or middle band), tight stop, and quick "
+                   "close target (EMA20/EMA50 or middle band), conditional stop on close, and quick "
                    "exit. Do not let it turn into a hold — the underlying trend remains bearish.")
         if n_bear >= 2:
             framing += " Bearish flags still active: extra tight leash."
