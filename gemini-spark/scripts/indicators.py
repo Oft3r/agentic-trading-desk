@@ -150,12 +150,10 @@ def bollinger(close: list[float], period: int = 20, mult: float = 2.0):
 
 def _slope(series: list[Optional[float]], lookback: int) -> Optional[float]:
     """Absolute variation of the indicator relative to `lookback` bars ago."""
-    valid_idx = [i for i, v in enumerate(series) if v is not None]
-    if len(valid_idx) <= lookback:
+    valid = _strip(series)
+    if len(valid) <= lookback:
         return None
-    last_i = valid_idx[-1]
-    prev_i = valid_idx[-1 - lookback]
-    return series[last_i] - series[prev_i]
+    return valid[-1] - valid[-1 - lookback]
 
 
 def compute(close: list[float], slope_lookback: int = 5) -> dict:
