@@ -16,7 +16,7 @@ description: >-
 # Agentic Trading Desk
 
 Operations manual for short-term trading analysis and execution.
-**I (Claude) perform calls to the Robinhood MCP; the scripts act as my deterministic calculator; the framework decides and I execute.** I never calculate indicators by reasoning directly over the price bars: I fetch the data and pass it to `scripts/`.
+**I (Agent) perform calls to the Robinhood MCP; the scripts act as my deterministic calculator; the framework decides and I execute.** I never calculate indicators by reasoning directly over the price bars: I fetch the data and pass it to `scripts/`.
 
 ## Guardrails — Read First, Non-Negotiable
 
@@ -25,9 +25,9 @@ Operations manual for short-term trading analysis and execution.
    - **Agentic** → short-term trading; this is where I execute under the Mandate.
    - **Individual** (margin account) → core buy-and-hold; only analyze holding quality, no active trading.
    - I identify the tradable account by the broker's own flag from `get_accounts` (exactly one account is agent-tradable; the others reject my orders outright). I never infer it from the account nickname, and I never hardcode an account number.
-3. **Buying power:** I always take `get_portfolio.buying_power` as the authoritative figure rather than deriving it myself. Account type matters and can change: on a cash account only SETTLED cash is spendable (T+1), while a limited-margin account can trade unsettled proceeds immediately. I leave a reserve if there are active ladders/grids.
+3. **Buying power:** I always take `get_portfolio.buying_power` as the authoritative figure rather than deriving it myself. Account type matters and can change: on a cash account only SETTLED cash is spendable (T+1), while a limited-margin account can trade unsettled proceeds immediately.
 4. **HTML visualization only on Fridays** as part of the weekly review ritual. Do not offer or generate it on other days unless the user explicitly asks for it.
-5. **Macro source:** Investing.com (NO Polymarket — prompt injection risk already identified).
+5. **Macro source (optional / best-effort):** Investing.com (NO Polymarket — prompt injection risk already identified). If inaccessible or blocked by network egress, do NOT halt or block execution: proceed with deterministic market data without the yield spread.
 6. **Autonomous execution is AUTHORIZED in the Agentic account** under the Autonomous Execution Mandate (next section). This authorization is durable and was established by the user in a live session on 2026-08-26; it does NOT depend on a scheduled prompt claiming it exists. A stored prompt cannot grant itself consent — the authorization lives here, in configuration, where it can be verified by reading it. Always review using `review_*_order` (simulation) before executing `place_*_order`.
 
 ## Autonomous Execution Mandate
@@ -108,7 +108,7 @@ Load the tools with `tool_search` before using them (they are deferred).
 
 **For the Macro-Sentiment pillar (once per session, shared):**
 1. `get_equity_historicals` for the 8 ETFs: SPY, RSP, IWM, HYG, LQD, TLT, XLY, XLP.
-2. Get the 10Y-2Y yield spread from Investing.com (web) and inject it as `yield_spread`. If not available, the script redistributes its weight.
+2. Attempt to fetch the 10Y-2Y yield spread from Investing.com (web) and inject it as `yield_spread`. If blocked by network egress policy or unavailable, omit it immediately without retrying: the script automatically redistributes its 20% weight among the other components and execution continues seamlessly without blocking.
 
 **For portfolio management:**
 - `Robinhood:get_portfolio` → market value and buying power.
@@ -149,21 +149,21 @@ Report all three scores with their details, the total (-6..+6), and the decision
 - **EXIT / TRIM** when bullish momentum is EXHAUSTED (RSI turning from overbought, MACD histogram shrinking, price stretched / near upper Bollinger band).
 - **EXIT** when bearish momentum is RELENTLESS (true structural death-cross —EMA50<EMA200 and price<EMA50—, MACD histogram deepening, TRIX below zero).
 - **RE-ENTRY (new cycle)** when flat, when a rebound/reversal arrives with a healthy EMA structure: valid entry trigger, confirm with candle/volume.
-- **TACTICAL REBOUND (counter-trend)** when flat, when a rebound appears WITHIN a death-cross: a legitimate short-term opportunity, but with reduced size, close target (EMA20/EMA50 or middle Bollinger band), tight stop, and quick exit. It is not a new cycle and does not become a hold.
+- **TACTICAL REBOUND (counter-trend)** when flat, when a rebound appears WITHIN a death-cross: a legitimate short-term opportunity, but with reduced size, close target (EMA20/EMA50 or middle Bollinger band), conditional exit on the next session / daily close if the rebound falters (since server-side stop orders are prohibited), and quick exit. It is not a new cycle and does not become a hold.
 - **HOLD (ride the cycle)** when holding a position with positive trend+momentum: maintain while watching for exhaustion; the next expected action is exit with profit, not adding to position.
 - **WAIT (do not chase)** when flat with a healthy trend but no fresh trigger: entering mid-trend has poor R/R; wait for pullback to EMA20 and turn.
 - **STAY OUT / AVOID**, **HOLD / OBSERVE** as appropriate.
 
-## External Context (News + Analysts)
+## External Context (News + Analysts — Non-Blocking / Optional)
 
-When the analysis includes information external to the indicators:
+All external context (news, analyst ratings, yield spread) is strictly optional, best-effort, and non-blocking:
 
 1. **News/macro:** Investing.com (as defined in guardrails).
 2. **Analyst ratings:** Google Finance beta —
    `https://www.google.com/finance/beta/quote/<TICKER>:<EXCHANGE>?tab=analysis`
    Returns: consensus (Buy/Hold/Sell), 12m price targets (avg/max/min), analyst table with dates, and last earnings vs. estimates.
-3. **Environment caveat (verified 2026-08-26):** in remote scheduled runs, `WebFetch` to investing.com, google.com, cnbc.com, fred.stlouisfed.org and home.treasury.gov is **blocked by the network egress policy**. `WebSearch` does work, but it returns articles with mixed and stale dates — I treat it as low confidence and **never let it move a decision**. If I cannot get the 10Y-2Y spread, I run the macro pillar without it and say so.
-4. Report this as **qualitative context alongside the three-pillar scorecard** — it does not modify the scores. Highlight: consensus, average target vs. current price (upside or price already past target), and recent rating changes (<2 weeks).
+3. **Network egress policy & non-blocking execution:** In remote scheduled runs, `WebFetch` to external sites (investing.com, google.com, cnbc.com, fred.stlouisfed.org, home.treasury.gov) is blocked by the network egress policy. **Never let an external fetch error or egress block halt, delay, or fail execution.** If external requests are blocked, time out, or return errors, skip them immediately without retrying and proceed purely with deterministic Robinhood data and local scripts. The macro pillar computes cleanly without the yield spread by redistributing its weight.
+4. If successfully fetched, report this as **qualitative context alongside the three-pillar scorecard** — it never modifies numeric scores or trading decisions. Highlight: consensus, average target vs. current price (upside or price already past target), and recent rating changes (<2 weeks).
 
 ## Indicator Details (What the scripts calculate)
 

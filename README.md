@@ -167,7 +167,7 @@ You: "Analyze AAPL for a potential entry"
    → Checks if there is an open position → sets holding = true/false
 
 2. Macro Pillar (once per session, shared across all tickers)
-   → Fetches historicals for 7 ETFs: SPY, RSP, IWM, HYG, LQD, TLT, XLY, XLP
+   → Fetches historicals for 8 ETFs: SPY, RSP, IWM, HYG, LQD, TLT, XLY, XLP
    → Retrieves 10Y-2Y yield spread from Investing.com
    → Runs: python3 scripts/macro_pillar.py → macro_score (-2 to +2)
 
