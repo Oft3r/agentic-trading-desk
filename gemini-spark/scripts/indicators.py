@@ -189,7 +189,8 @@ def compute(close: list[float], slope_lookback: int = 5) -> dict:
     bars_since_below_ema20 = None
     for back in range(len(close)):
         i = len(close) - 1 - back
-        if ema20[i] is not None and close[i] < ema20[i]:
+        e = ema20[i]
+        if e is not None and close[i] < e:
             bars_since_below_ema20 = back
             break
 

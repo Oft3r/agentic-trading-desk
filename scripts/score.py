@@ -82,7 +82,8 @@ def score_momentum(ind: dict) -> tuple[int, str]:
 def _flags(ind: dict) -> dict:
     c = ind["close"]
     e20 = ind["ema20"]; e50 = ind["ema50"]; e200 = ind["ema200"]
-    s200 = ind["ema200_slope"]
+    s20 = ind.get("ema20_slope")
+    s200 = ind.get("ema200_slope")
     rsi, rsi_p = ind["rsi14"], ind["rsi14_prev"]
     hist, hist_p = ind["macd_hist"], ind["macd_hist_prev"]
     trix, trix_sig = ind["trix"], ind["trix_signal"]
@@ -102,7 +103,8 @@ def _flags(ind: dict) -> dict:
         exhaustion.append(f"price stretched {stretch*100:.0f}% above EMA20")
 
     # --- Relentless bearish ---
-    if e50 and e200 and s200 is not None and c < e50 and e50 < e200 and s200 < 0:
+    if (e50 is not None and e200 is not None and s200 is not None
+            and c < e50 and e50 < e200 and s200 < 0):
         bearish.append("price<EMA50<EMA200 with EMA200↓")
     if hist is not None and hist_p is not None and hist < 0 and hist < hist_p:
         bearish.append("MACD histogram deepening in negative territory")
@@ -119,7 +121,7 @@ def _flags(ind: dict) -> dict:
     # Genuine recovery of EMA20: currently above EMA20, but closed below it within last 5 bars.
     # Without a recent dip, it is a normal uptrend, not a rebound.
     bsb = ind.get("bars_since_below_ema20")
-    if (e20 and c > e20 and ind["ema20_slope"] is not None and ind["ema20_slope"] > 0
+    if (e20 is not None and c > e20 and s20 is not None and s20 > 0
             and bsb is not None and 1 <= bsb <= 5):
         rebound.append(f"price reclaims EMA20 (closed below {bsb} bar{'s' if bsb > 1 else ''} ago)")
     # Fresh TRIX cross detected on the crossover bar (not while it persists).
@@ -129,7 +131,7 @@ def _flags(ind: dict) -> dict:
         rebound.append("fresh bullish TRIX cross below zero")
 
     # Structure in a true death-cross (not proxied by trend score)
-    death_cross = bool(e50 and e200 and e50 < e200 and c < e50)
+    death_cross = bool(e50 is not None and e200 is not None and e50 < e200 and c < e50)
 
     return {"exhaustion": exhaustion, "bearish": bearish, "rebound": rebound,
             "death_cross": death_cross, "stretch_pct": round(stretch * 100, 1)}
