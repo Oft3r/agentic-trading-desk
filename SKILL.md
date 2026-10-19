@@ -5,7 +5,7 @@ description: >-
   via Robinhood MCP. ALWAYS USE IT whenever the user asks to analyze a ticker,
   review positions, decide entries/exits/rebuys, calculate indicators
   (EMA/RSI/MACD/TRIX/Bollinger), score with the three-pillar framework, read
-  the macro regime, or manage the Agentic account — even if he doesn't
+  the macro regime, or manage the Agentic account — even if they don't
   explicitly name the skill. Compute all indicators using deterministic code
   (never by eye) from raw Robinhood bars, apply the exit-on-exhaustion /
   re-enter-on-rebound logic, and respect account guardrails. Executes
@@ -42,42 +42,46 @@ The user authorizes executing orders without in-the-moment confirmation, **only*
 - Optional: for a news-driven entry, require the tape to be moving in the direction of the thesis before acting rather than anticipating the move. Rationale in *External Context* below — in scheduled runs the news source is the weakest input available, and price confirmation is the cheapest guard against acting on a mis-dated headline.
 
 **Hard limits**
-- Max **$1,200** per order.
+- **Position size:** base size = **3% of account value**, and never more than **$1,200** per buy order. TACTICAL REBOUND = half of base size. Sells are not notional-capped: they can only reduce exposure (Robinhood offers no short selling, so a sell is bounded by the shares held), and a cap would block exiting a position that has grown past $1,200.
 - Max **3 new positions** per session. Exits are uncapped.
 - Minimum **15% of account value held in cash**. I never touch that reserve.
-- **Order type follows the session clock** (rule set by Eli on 2026-08-26, replacing the earlier limit-only rule):
-  - **Regular hours — Mon–Fri 09:30–15:58 ET: `type: "market"`.** If the analysis says enter, enter; a passive limit resting on a price is not an entry. `dollar_amount` IS permitted here — it is the natural way to size at 3% of the account, and the MCP only accepts it with `type=market`.
-  - **Outside regular hours: `type: "limit"` with an explicit `limit_price`, marketable** — at or just through the far side of the spread, within 0.3% of the last trade — and sized in SHARES (`quantity = dollars / limit_price`, truncated to 6 decimals). Never `dollar_amount` here: the MCP would silently convert it to a market order that fills at an unknown price hours later. Fractional limit orders ARE supported despite the tool schema's fractional note (verified 2026-08-26 via `review_equity_order`: DIA buy limit `quantity=0.400000` @ 534.50, accepted with an empty `order_checks`).
-  - **`stop_market` and `stop_limit` are prohibited at all times.** Robinhood also rejects stops on fractional shares, so stops in this account are manual levels I re-check each session, not resting orders.
-  - **`time_in_force` must be `gfd`.** No order outlives the session that placed it — an order queued overnight is an unattended fill at a price nobody evaluated.
-  - Why the split: the original limit-only rule existed because unattended market orders have invisible slippage. Gating market orders on the session clock answers that directly — they fire only while the book is deep and the session is live, and everything outside that window stays priced.
+- **Orders only during regular hours — Mon–Fri 09:30–15:58 ET** (rule set by the user on 2026-10-19, replacing the 2026-08-26 after-hours limit rule). Outside that window I place **no orders at all**, buys or sells: I run the analysis, report what the framework emitted, and carry any action to the next regular session, re-running the analysis then. Why: every position in this account is fractional and base size (~3% of the account) is below one share of almost everything it trades, and Robinhood accepts fractional and dollar-based orders **only in `regular_hours`** (verified 2026-10-19 via `review_equity_order`: a fractional limit with `market_hours=extended_hours` is rejected — *"fractional and dollar-based orders are only allowed in regular_hours"*; the same order without `market_hours` is accepted, but as a `regular_hours` order that queues for the next open). The 2026-08-26 "fractional limits work after hours" verification had tested the second case, so an "after-hours" order was really an order queued for the next open at a price nobody re-evaluated.
+- **Order shape:**
+  - **`type: "market"`** only. If the analysis says enter, enter; a passive limit resting on a price is not an entry. `limit`, `stop_market` and `stop_limit` are prohibited — Robinhood also rejects stops on fractional shares, so stops in this account are manual levels I re-check each session, not resting orders.
+  - **`market_hours`** omitted or `regular_hours`.
+  - **Buys are sized in `dollar_amount`** — it is the natural way to size at 3% of the account, and the only way the notional is visible in the payload (a market buy by `quantity` carries no price, so the $1,200 cap could not be checked; the guard denies it). **Sells may use `quantity`** (`shares_available_for_sells`) so a whole position can be closed exactly.
+  - **`time_in_force` set explicitly to `gfd`** (an omitted field is denied, not defaulted). No order outlives the session that placed it.
 - **Order preflight.** Before every `place_equity_order` I print this table and check every row. If any row fails, I do NOT place the order — I report instead.
 
   | field | value | check |
   |---|---|---|
-  | ET clock | … | inside or outside Mon–Fri 09:30–15:58? |
-  | `type` | … | `market` inside RTH · `limit` outside · never `stop_*` |
-  | `limit_price` | … | outside RTH only: marketable, within 0.3% of last trade |
-  | sizing | … | `dollar_amount` inside RTH · `quantity` in shares outside |
-  | `time_in_force` | … | must be `gfd` |
-  | notional | `dollar_amount` or `quantity × limit_price` | ≤ $1,200 |
-- **The guard is not load-bearing unless `jq` is installed.** The hook implements every rule with `jq`; without it the script exits 0 with no output and the runner reads that as ALLOW (verified 2026-08-26 — an early revision let a `stop_market` through). It now fails closed, but a guard that denies everything is not a working setup either. See *Session start — prove the guard is alive* below; either way I treat the preflight table above as the real check, not the hook.
+  | ET clock | … | inside Mon–Fri 09:30–15:58 (otherwise: no order) |
+  | `side` | … | `buy` or `sell` |
+  | `type` | … | `market` |
+  | `market_hours` | … | omitted or `regular_hours` |
+  | sizing | … | exactly one · buys `dollar_amount` · sells `dollar_amount` or `quantity` |
+  | `time_in_force` | … | explicitly `gfd` |
+  | notional (buys) | `dollar_amount` | ≤ 3% of account value and ≤ $1,200 |
+- **The guard fails closed.** Without `jq`, with an unparseable payload, or with an unreadable clock it denies; the registered hook command wraps it so a missing or crashing script exits 2, which blocks the call (a plain non-zero exit would be a non-blocking error, i.e. ALLOW). Even so, I treat the preflight table above as the real check, not the hook — see *Session start* below for where the hook does and does not run.
 - No new position in a single name within 2 sessions of confirmed earnings (`get_earnings_calendar`). ETFs exempt.
-- I run `review_equity_order` before every `place_equity_order`. If the simulation differs by more than 1% in price or quantity from what I computed, **I abort and report**.
+- I run `review_equity_order` with the exact parameters before every `place_equity_order`. **I abort and report** if `order_checks` is non-empty (I surface the alert verbatim), or if `quote_data.last_trade_price` is more than 1% away from the price the analysis used. A dollar-sized market order's review returns no share quantity or fill price — the quote is what I check. If the review returns `customer_approval_required: true`, the order goes to the user for approval in the Robinhood app: I report it as *pending approval*, not as executed.
 
 **Session start — prove the guard is alive**
 
-The Mandate is prose, and prose cannot enforce itself; `hooks/mandate-order-guard.sh` is what makes "limit orders only" mechanical. The failure mode that matters is that a guard which is unwired, non-executable, or missing `jq` looks exactly like a working one until an order slips through. That is not hypothetical: on 2026-08-26 a `stop_market` passed because `jq` was absent and the script exited 0 with no output, which the hook runner reads as ALLOW. So before the first `place_equity_order` of any session I run:
+The Mandate is prose, and prose cannot enforce itself; `hooks/mandate-order-guard.sh` is what makes the order rules above mechanical. The failure mode that matters is that a guard which is unwired, non-executable, or missing `jq` looks exactly like a working one until an order slips through. That is not hypothetical: on 2026-08-26 a `stop_market` passed because `jq` was absent and the script exited 0 with no output, which the hook runner reads as ALLOW. So before the first `place_equity_order` of any session I run:
 
 ```bash
 bash <skill-dir>/scripts/session-setup.sh
 ```
 
-It installs `jq`, marks the guard executable, and runs **8 probes across both clock branches** — 6 orders the Mandate prohibits, which must be denied, and 2 it permits, which must pass. Probing only for denials is not enough: a guard that blocks *everything* is just as broken as one that blocks nothing, and from a single deny probe the two look identical. The probes pin the guard's session clock via `MANDATE_FAKE_ET` so both the regular-hours and after-hours branches are testable whenever the session happens to boot. Exit 0 with `order guard verified` means the guard is actually evaluating rules. **Any other outcome means it is not, and I do not execute orders that session** — I still run the analysis and report what the framework emitted, and I say plainly that execution was disabled and why. Analysis with a broken guard is useful; unattended execution with one is not.
+It installs `jq`, marks the guard executable, checks that the user-level copy (`~/.claude/hooks/mandate-order-guard.sh`, if present) is byte-identical to the skill's own, and runs **15 probes against every copy** — 12 orders the Mandate prohibits (stop, limit, market buy by quantity, over-cap notional, `gtc` or missing `time_in_force`, `extended_hours`, non-numeric size, any order after hours or on a weekend), which must be denied, and 3 it permits, which must pass. Probing only for denials is not enough: a guard that blocks *everything* is just as broken as one that blocks nothing, and from a single deny probe the two look identical. The probes pin the guard's clock via `MANDATE_FAKE_ET`, so both sides of the clock are tested whenever the session boots. Exit 0 with `order guard verified` means the guard is actually evaluating rules. **Any other outcome means it is not, and I do not execute orders that session** — I still run the analysis and report what the framework emitted, and I say plainly that execution was disabled and why.
 
-One thing to be honest about with myself: `.claude/settings.json` only loads for a session whose *project directory* contains it. When the desk is loaded as an installed skill rather than opened as a project, the `PreToolUse` hook never registers, and the probe above verifies only that the script *would* deny if it were called. In that mode nothing outside me is checking, so the preflight table is the entire safety margin — I fill it in row by row before every order and abort on any failing row, rather than treating it as paperwork.
+**Where the hook actually runs — I state which case applies in the session report.** Hooks are a Claude Code feature, registered in a `settings.json`:
+- **Claude Code on the user's machine, any project, skill mode included** → the user-level registration in `~/.claude/settings.json` (matcher `mcp__.*Robinhood__place_equity_order`, command pointing at `~/.claude/hooks/mandate-order-guard.sh`). Verified live 2026-10-19: a prohibited `place_equity_order` was denied by the hook before reaching Robinhood. The copy must be kept in sync — a stale August copy stayed registered into October; `session-setup.sh` now fails when they differ.
+- **Claude Code with this repo as the project directory** (local or cloud) → `.claude/settings.json` in the repo also registers it, plus the `SessionStart` setup.
+- **Any other client — the claude.ai app, Cowork, a scheduled run that opens a different repo, another agent runtime** → **no hook runs.** The probe above then only proves the script *would* deny if called. Nothing outside me is checking: the preflight table is the entire safety margin, and I fill it in row by row before every order and abort on any failing row. The only broker-side control that applies in every client is Robinhood's trade-approval setting (`get_trade_approval_setting` → `human_must_approve_trades`), which only the user can change in the app.
 
-**This is not hypothetical, and I state it in the session report when it applies.** On 2026-08-26 a `market` order with `dollar_amount: 250` (DIA) and two `market` orders (JPM, 2026-08-25) went through in skill mode with the guard unregistered. Under the current clock rule all three were placed during regular hours and would now pass the guard on their merits — but they passed then because *nothing was checking*, which is a different thing from being allowed. If the session self-audit shows agentic orders and I am running in skill mode, I say so plainly: the orders were unguarded, whatever their contents turned out to be.
+**If the self-audit shows agentic orders placed from an unguarded client, I say so plainly** — the orders were unguarded, whatever their contents turned out to be. (On 2026-08-25/26 three `market` orders — DIA, JPM ×2 — went through in skill mode with the guard unregistered. They would pass today's rules, but they passed then because *nothing was checking*, which is a different thing from being allowed.)
 
 **Circuit breakers**
 - If account value at session open is down **more than 4%** against the prior close: no new buys that day. Exits remain allowed.
@@ -97,9 +101,9 @@ One thing to be honest about with myself: `.claude/settings.json` only loads for
 
 Load the tools with `tool_search` before using them (they are deferred).
 
-**Guard verification runs before any of this** — see *Session start — prove the guard is alive* in the Mandate. No order goes out in a session where the probe did not come back denied.
+**Guard verification runs before any of this** — see *Session start — prove the guard is alive* in the Mandate. No order goes out in a session where `session-setup.sh` did not exit 0 printing `order guard verified`.
 
-**Session self-audit (first call of every run).** `get_equity_orders` on the agent-tradable account with `placed_agent="agentic"` since the previous session. An order is a Mandate breach by a prior run if it is a `stop_market` or `stop_limit`; if it is a `market` order whose `market_hours` field is anything other than `regular_hours`; if it carries a `dollar_amount` outside regular hours; if its `time_in_force` is not `gfd`; or if its notional exceeds $1,200. I check `type`, `market_hours`, `time_in_force` and notional on every order returned, and surface any breach in the push notification rather than letting it pass silently. The broker's order history is the only durable record — the execution container is ephemeral, so a breach that is not surfaced today is lost.
+**Session self-audit (first call of every run).** `get_equity_orders` on the agent-tradable account with `agent_initiated=true` since the previous session (this also catches agent orders the user approved in the app, which `placed_agent="agentic"` alone would miss). An order is a Mandate breach by a prior run if its `type` is anything but `market`; if its `market_hours` is anything but `regular_hours`; if it was created outside Mon–Fri 09:30–15:58 ET; if its `time_in_force` is not `gfd`; if it is a buy without `dollar_based_amount`; or if it is a buy whose notional exceeds $1,200. I check all of these on every order returned, and surface any breach in the push notification rather than letting it pass silently. The broker's order history is the only durable record — the execution container is ephemeral, so a breach that is not surfaced today is lost.
 
 **To analyze a ticker:**
 1. `Robinhood:get_equity_historicals` → ~290 daily bars (closes). This is the input for `indicators.py`. Request a range that yields ≥220 bars (ideal for EMA200).
@@ -119,19 +123,32 @@ Load the tools with `tool_search` before using them (they are deferred).
 
 Scripts are pure stdlib; they do not need internet access. They live in `scripts/` **inside this skill's own directory** — the runtime gives me the base path when it loads the skill. I never hardcode that path: it differs between environments.
 
-Robinhood historicals are large and routinely exceed the tool's output limit; when that happens the result is written to a file and I get the path back. **I process them with code straight from that file** — I never load raw bars into context.
+Robinhood historicals are large and routinely exceed the tool's output limit; when that happens the result is written to a file and I get the path back. **I process them with code straight from that file** — I never load raw bars into context. I save the `get_equity_quotes` responses to a file as well (they are small and come back inline).
 
-**Step 0 — append today's close (every session, before anything else).** Daily bars from `get_equity_historicals` do NOT include the current session until well after the close: right after 16:00 ET the last bar is still *yesterday*, so scoring that series scores yesterday's market. For every symbol I take `get_equity_quotes` → `last_trade_price` (the ~19:59:59Z print is today's closing trade) and append it to the closes array with today's date, after asserting the last existing bar is the prior session. Never append `last_non_reg_trade_price` — extended-hours prints are not closes.
-
-**Step 1 — Macro (once per session).** The input schema is `{"as_of": "YYYY-MM-DD", "series": {"SPY": [...], "RSP": [...], …}, "yield_spread": <float, optional>}`. The closes go **nested under `series`**, not at the top level — a flat `{"SPY": [...]}` raises `ValueError: No components with sufficient data`. Then run:
+**Step 0 — prepare the inputs (every session, before anything else).**
 ```bash
-python3 scripts/macro_pillar.py macro_input.json --json
+python3 scripts/prepare_inputs.py --historicals <historicals files…> --quotes <quotes files…> --out <workdir>
 ```
-Save the `pillar_score` (-2..+2). That number is the Macro-Sentiment score for ALL tickers today.
+It does two things I must never do by eye:
+1. **Drops bars flagged `interpolated: true`.** `get_equity_historicals` synthesizes bars to fill gaps — including the whole span before a symbol's first trade. Found 2026-10-19: SPCX (first trade 2026-06-12) came back with 318 bars, 230 of them fake; scored over them it showed "EMA50>EMA200, EMA200↑", both invented. With real bars only it has 89 bars and the Trend pillar is marked `partial: 2/4 components`.
+2. **Makes the last bar today's, from the broker's own dates** (`previous_close_date`, `venue_last_trade_time`, read in America/New_York — never a hard-coded UTC time, which breaks at every daylight-saving change). Daily bars do not include the current session until well after the close:
+   - last real bar is today → nothing appended;
+   - last bar is the prior session and the quote traded today ≥ 09:30 ET → `last_trade_price` appended: **final** after 16:00 ET, **provisional** during regular hours — then I label the scorecard `intraday (partial bar)`, because flags that hinge on the last bar (RSI turn, MACD histogram slope, %B, EMA20 reclaim) can flip by the close, and that uncertainty goes in the written reasoning of any trade taken on it;
+   - pre-open, weekend or holiday → nothing appended;
+   - last bar older than the prior session → **STALE, symbol excluded** (data does not reconcile — circuit breaker).
+   `last_non_reg_trade_price` is never used: extended-hours prints are not closes.
 
-**Step 2 — Per ticker.** Assemble `{symbol, close:[...], macro_score, holding}` and run:
+Output: `ticker_<SYM>.json` per symbol, `macro_input.json` (the 8 ETFs, nested under `series`), and `closes.json` with the per-symbol report (real bars, dropped bars, appended mode, warnings). Every warning it prints goes into the session report.
+
+**Step 1 — Macro (once per session).**
 ```bash
-python3 scripts/score.py ticker_input.json
+python3 scripts/macro_pillar.py <workdir>/macro_input.json --json
+```
+To add the 10Y-2Y spread, insert `"yield_spread": <float or series>` into `macro_input.json` first. Save the `pillar_score` (-2..+2). That number is the Macro-Sentiment score for ALL tickers today.
+
+**Step 2 — Per ticker.**
+```bash
+python3 scripts/score.py <workdir>/ticker_<SYM>.json --macro-score <pillar_score> --holding <true|false>
 ```
 This returns the three-pillar scorecard + decision (EXIT / TRIM, EXIT, RE-ENTRY (new cycle), TACTICAL REBOUND (counter-trend), HOLD (ride the cycle), HOLD (under review), WAIT (do not chase), STAY OUT / AVOID, HOLD / OBSERVE, OBSERVE) along with the exhaustion/bearish/rebound/death-cross flags that justify it. Passing the correct `holding` value is key: the decision cascade behaves differently depending on whether there is an open position or we are flat.
 
@@ -175,7 +192,7 @@ All external context (news, analyst ratings, yield spread) is strictly optional,
 - **Bollinger Bands** 20/2 with **population** standard deviation; report %B.
 - Slopes are measured against 5 bars ago (configurable with `--slope-lookback`).
 
-See `scripts/indicators.py` and `scripts/score.py` for exact implementation details. The math is verified against known test cases (constant EMA, monotonic series RSI, MACD = EMA12 - EMA26).
+See `scripts/indicators.py` and `scripts/score.py` for exact implementation details. The math is checked by known-answer self-tests (constant-series EMA, monotonic-series RSI, MACD = EMA12 − EMA26, flat-series %B); `score.py` also asserts the decision on synthetic exhaustion and downtrend scenarios. Run any script with no arguments to execute its self-test — a non-zero exit means do not trust the numbers that session.
 
 ## What This Skill Does NOT Do
 

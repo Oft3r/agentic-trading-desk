@@ -216,6 +216,29 @@ def _round(d: dict, nd: int = 4) -> dict:
     return {k: (round(v, nd) if isinstance(v, float) else v) for k, v in d.items()}
 
 
+def _self_test() -> list[str]:
+    """Known-answer checks backing the claims in SKILL.md."""
+    failures = []
+    const = [50.0] * 250
+    if any(abs(v - 50.0) > 1e-9 for v in _strip(ema_series(const, 20))):
+        failures.append("EMA of a constant series is not the constant")
+    up = [100.0 + i for i in range(60)]
+    if any(abs(v - 100.0) > 1e-9 for v in _strip(rsi_wilder(up, 14))):
+        failures.append("RSI of a strictly rising series is not 100")
+    down = [200.0 - i for i in range(60)]
+    if any(abs(v) > 1e-9 for v in _strip(rsi_wilder(down, 14))):
+        failures.append("RSI of a strictly falling series is not 0")
+    import math
+    wave = [100 + 10 * math.sin(i / 9) for i in range(120)]
+    line, sig, hist = macd(wave)
+    e12, e26 = ema_series(wave, 12), ema_series(wave, 26)
+    if abs(line[-1] - (e12[-1] - e26[-1])) > 1e-9 or abs(hist[-1] - (line[-1] - sig[-1])) > 1e-9:
+        failures.append("MACD line != EMA12 - EMA26 or hist != line - signal")
+    if bollinger(const)[3] != 0.5:
+        failures.append("%B of a flat series is not 0.5")
+    return failures
+
+
 def main() -> int:
     import argparse
     ap = argparse.ArgumentParser(description="Deterministic indicator stack (input: JSON of closes).")
@@ -230,8 +253,14 @@ def main() -> int:
         close = [float(x) for x in close]
     else:
         import math
+        failures = _self_test()
+        if failures:
+            for msg in failures:
+                print(f"SELF-TEST FAIL: {msg}", file=sys.stderr)
+            return 1
+        print("[self-test OK: constant EMA, monotonic RSI, MACD = EMA12 - EMA26, flat %B]", file=sys.stderr)
         close = [round(100 + 18 * math.sin(i / 22) + i * 0.06, 2) for i in range(290)]
-        print("[self-test: synthetic series of 290 bars]\n", file=sys.stderr)
+        print("[synthetic series of 290 bars]\n", file=sys.stderr)
 
     print(json.dumps(_round(compute(close, args.slope_lookback)), indent=2, ensure_ascii=False))
     return 0

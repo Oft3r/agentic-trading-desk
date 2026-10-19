@@ -1,0 +1,19 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR\"/scripts/session-setup.sh", "timeout": 120 }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "mcp__.*Robinhood__place_equity_order",
+        "hooks": [
+          { "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR\"/hooks/mandate-order-guard.sh || { echo 'MANDATE BLOCK: the order guard failed to run (missing or crashed); failing closed.' >&2; exit 2; }", "timeout": 10 }
+        ]
+      }
+    ]
+  }
+}

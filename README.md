@@ -29,7 +29,10 @@ graph TD
 *   **[scripts/indicators.py](scripts/indicators.py)**: Mathematical engine to calculate technical indicators without visual estimations.
 *   **[scripts/macro_pillar.py](scripts/macro_pillar.py)**: Macro regime detector and cross-asset sentiment scorer.
 *   **[scripts/score.py](scripts/score.py)**: Evaluator of the three-pillar framework and exit/entry decision engine.
-*   **[gemini-spark/](gemini-spark/)**: Sanitized version of the skill and scripts compatible with Gemini Spark security policies.
+*   **[scripts/prepare_inputs.py](scripts/prepare_inputs.py)**: Turns raw Robinhood MCP output into script inputs — drops interpolated bars and appends today's close (Step 0) from the broker's own dates.
+*   **[scripts/session-setup.sh](scripts/session-setup.sh)**: Installs `jq` and proves the order guard is alive (15 probes per guard copy, plus a sync check of the user-level copy).
+*   **[hooks/mandate-order-guard.sh](hooks/mandate-order-guard.sh)** + **[.claude/settings.json](.claude/settings.json)**: `PreToolUse` guard that enforces the Mandate's order rules outside the model.
+*   **[gemini-spark/](gemini-spark/)**: Sanitized version of the skill and scripts compatible with Gemini Spark security policies. The scripts are identical copies of `scripts/` and the order-type rules match the main skill; the intentional difference is that the Spark version allows **zero discretion** (only `score.py` decisions are executable) and does not ship the order-guard hook.
 
 ---
 
@@ -65,7 +68,14 @@ Calculated by the [scripts/macro_pillar.py](scripts/macro_pillar.py) cross-asset
 
 ## 🛠️ Script Usage
 
-The scripts are run via the command line consuming data in JSON format.
+The scripts are run via the command line consuming data in JSON format. Run any of them with no arguments to execute its self-test.
+
+### 0. Preparing Inputs from Robinhood MCP Output
+Save the `get_equity_historicals` and `get_equity_quotes` responses to files, then:
+```bash
+python3 scripts/prepare_inputs.py --historicals hist1.json hist2.json --quotes quotes.json --out work/
+```
+It drops bars flagged `interpolated: true` (synthetic fill — e.g. the whole span before a recent IPO), appends today's `last_trade_price` when the session has traded (marked *provisional* during regular hours, *final* after 16:00 ET), excludes stale symbols, and writes `work/ticker_<SYM>.json`, `work/macro_input.json` and a per-symbol report in `work/closes.json`.
 
 ### 1. Raw Indicators Computation
 To obtain the detailed breakdown of all calculated indicators for an asset:
@@ -108,6 +118,7 @@ To obtain the complete three-pillar scorecard and action suggestion for the Agen
 python3 scripts/score.py ticker_input.json        # human-readable table
 python3 scripts/score.py ticker_input.json --json  # machine-readable output
 python3 scripts/score.py                           # self-test with synthetic data
+python3 scripts/score.py work/ticker_AAPL.json --macro-score 1 --holding true  # override input fields
 ```
 *Expected format for `ticker_input.json`:*
 ```json
@@ -142,11 +153,12 @@ Before selecting a decision, the script detects **flags** — specific indicator
 To use this project as a **Skill** with Claude Code for automated trading analysis:
 
 ### 1. Add the Skill
-Place the `SKILL.md` file in your Claude Code skills directory (typically `~/.claude/code/skills/`):
+Place the skill in your Claude Code skills directory (`~/.claude/skills/`), or upload it as a skill on claude.ai:
 ```bash
 # Clone or copy this repository to your skills folder
-cp -r /path/to/agentic-trading-desk ~/.claude/code/skills/agentic-trading-desk
+cp -r /path/to/agentic-trading-desk ~/.claude/skills/agentic-trading-desk
 ```
+Then register the order guard at user level — see *Enforcing the Mandate* below. A skill directory is not a project directory, so the skill's own `.claude/settings.json` is not read.
 
 Or reference it directly from this repository.
 
@@ -156,7 +168,7 @@ Once loaded, Claude Code will:
 * Fetch data via Robinhood MCP protocol
 * Call the Python scripts (`scripts/indicators.py`, `scripts/score.py`, `scripts/macro_pillar.py`) for deterministic calculations
 * Present the three-pillar scorecard with actionable decisions
-* **Execute autonomously in the Agentic account under the Autonomous Execution Mandate** — market orders during regular hours, marketable limit orders outside them, never stop orders, within hard caps on order size, new positions per session, and cash reserve. See the Mandate section in [SKILL.md](SKILL.md) for the exact limits, and set them to your own risk tolerance before enabling.
+* **Execute autonomously in the Agentic account under the Autonomous Execution Mandate** — market orders during regular hours only, no orders at all outside them, never limit or stop orders, within hard caps on order size, new positions per session, and cash reserve. See the Mandate section in [SKILL.md](SKILL.md) for the exact limits, and set them to your own risk tolerance before enabling.
 
 ### 3. Example Workflow
 ```
@@ -188,7 +200,7 @@ You: "Analyze AAPL for a potential entry"
    → If it falls outside the limits: no trade, and the reason is reported
 ```
 
-The agent operates under the principle: **AI fetches data; scripts perform deterministic calculations; the framework decides and the agent executes within limits you set in advance.** Discretion is deliberately absent — if `score.py` did not emit an executable decision, there is no trade.
+The agent operates under the principle: **AI fetches data; scripts perform deterministic calculations; the framework decides and the agent executes within limits you set in advance.** Discretionary trades are allowed in the main skill, but each one must carry its written reasoning in the session report (what was seen, why it justified acting, what would prove it wrong). The Gemini Spark version allows zero discretion.
 
 ---
 
@@ -214,7 +226,7 @@ To complement the purely technical nature of the deterministic scripts, the AI a
     *   **Agentic**: Oriented toward fast returns and capital rotation via tactical trades and defined cycles. The only account the Mandate covers.
     *   **Individual** (Margin Account): Core passive long-term investing. Analysis only.
 3.  **Buying Power**: Always taken from `get_portfolio.buying_power` rather than derived. Account type matters and can change: a cash account settles T+1, while a limited-margin account can trade unsettled proceeds immediately.
-4.  **Mandatory Simulation**: Every order passes through `review_*_order` before `place_*_order`. If the simulation disagrees with the computed order by more than 1% on price or quantity, the trade is aborted and reported.
+4.  **Mandatory Simulation**: Every order passes through `review_*_order` with the exact parameters before `place_*_order`. The trade is aborted and reported if the review returns any `order_checks` alert, or if its quote is more than 1% away from the price the analysis used (a dollar-sized market order's review has no fill price or share count to compare). An order that comes back `customer_approval_required` is reported as pending approval, not executed.
 5.  **Mandate Limits Are Hard**: A limit exceeded is not a prompt to ask for permission — it is a stop. The agent does not trade and reports why. Circuit breakers halt new buys if the account is down more than 4% on the day, or if the data does not reconcile.
 6.  **No Backtest**: This framework has not been backtested. A trigger firing does not make it correct. Set the Mandate limits to a size where being wrong is survivable.
 
@@ -222,96 +234,62 @@ To complement the purely technical nature of the deterministic scripts, the AI a
 
 ## 🔒 Enforcing the Mandate (`hooks/mandate-order-guard.sh`)
 
-The Mandate constrains order type by session: **`market` during regular hours** (a signal should put you in the trade, not leave a limit resting), **marketable `limit` outside them**, and **never a stop order**. That sentence is **prose addressed to the model** — nothing enforces it, and in practice it has been broken.
+The Mandate's order rules — **`market` orders during regular hours only, no orders outside them, never a limit or stop order, buys sized in dollars and capped** — are prose addressed to the model. Nothing in the prose enforces them, and in practice they have been broken. `hooks/mandate-order-guard.sh` is a `PreToolUse` hook that runs in the Claude Code harness, outside the model, and denies the `place_equity_order` call before it leaves.
 
-The break is not carelessness; it is structural. The Robinhood MCP schema states:
+**Why no orders outside regular hours.** The agentic account holds fractional positions and sizes entries at ~3% of the account, below one share of nearly everything it trades. Robinhood accepts fractional and dollar-based orders **only in `regular_hours`** (verified 2026-10-19 with `review_equity_order`: a fractional limit with `market_hours=extended_hours` is rejected with *"fractional and dollar-based orders are only allowed in regular_hours"*; without `market_hours` the same order is accepted — as a `regular_hours` order that queues for the next open). An earlier verification that "fractional limits work after hours" had tested the second case. So after hours there is nothing the desk can trade that would actually fill after hours.
 
-> `dollar_amount`: USD notional. **Only valid with `type=market`.**
+The guard reads the session clock in America/New_York (RTH = Mon–Fri 09:30–15:58 ET; holidays are not known to it — `gfd` is the backstop).
 
-So any run that sizes an order in dollars — the natural way to think about a small account — is pushed by the schema itself into a market order. In regular hours that is now fine; after hours it is not, because the broker will not execute a market order then and it queues blind to the next open. The schema further implies fractional shares require `type=market`. **That part is wrong**: a fractional *limit* order is accepted (verified via `review_equity_order`: DIA buy limit `quantity=0.400000` @ 534.50, empty `order_checks`). The correct sizing is `quantity = dollars / limit_price`.
+| Order | Guard |
+|---|---|
+| RTH: `market` buy + `dollar_amount` ≤ $1,200, `gfd` | ALLOW |
+| RTH: `market` sell, `dollar_amount` or `quantity`, `gfd` | ALLOW |
+| RTH: `market` buy by `quantity` | DENY — no price in the payload, cap uncheckable |
+| `limit`, `stop_market`, `stop_limit` | DENY |
+| any order outside RTH, or on a weekend | DENY |
+| `market_hours` other than `regular_hours` | DENY |
+| `time_in_force` missing or not `gfd` | DENY |
+| `side` not `buy`/`sell`; non-numeric or ≤ 0 size; both or neither of `dollar_amount`/`quantity`; `limit_price` on a market order | DENY |
+| buy with notional > $1,200 | DENY |
+| unparseable payload, unreadable clock, or `jq` not installed | DENY — the guard fails closed |
+| guard script missing or crashing | DENY — the registered command exits 2 (blocking) |
 
-`hooks/mandate-order-guard.sh` is a `PreToolUse` hook that closes this deterministically. It runs in the harness, outside the model, and denies the tool call before it leaves:
+Sells are not notional-capped: Robinhood has no short selling, so a sell is bounded by the shares held, and a cap would block exiting a position that has grown past $1,200.
 
+**Fail-closed, end to end.** Every rule is implemented with `jq`; without it the script would exit 0 with no output, which the hook runner reads as ALLOW, so the guard checks for `jq` first and denies without it (verified 2026-08-26: an earlier revision let a `stop_market` through that way). A hook command that fails with a non-zero exit other than 2 is a *non-blocking* error — also an ALLOW — so the registered command is wrapped: `bash guard.sh || { echo '…' >&2; exit 2; }`.
+
+### Where the hook runs — and where it does not
+
+Hooks are a Claude Code feature. They run only where a `settings.json` registers them:
+
+| Client | Guard | How |
+|---|---|---|
+| Claude Code on your machine — any project, skill mode included | ✅ | **User level**: `~/.claude/settings.json` + a copy at `~/.claude/hooks/mandate-order-guard.sh` (recommended; below) |
+| Claude Code with this repo as the project directory (local or cloud) | ✅ | **Project level**: [.claude/settings.json](.claude/settings.json), also wires `SessionStart` → `session-setup.sh` |
+| claude.ai app, Cowork, other agent runtimes, a scheduled run that opens another repo | ❌ | No hooks exist there. The `SKILL.md` preflight table is the whole safety margin; the only broker-side control is Robinhood's trade-approval setting (`human_must_approve_trades`), which only you can change in the app |
+
+**User-level install** (keep the copy outside removable media, so the path always resolves):
+```bash
+install -m 755 hooks/mandate-order-guard.sh ~/.claude/hooks/mandate-order-guard.sh
+```
 ```json
 {
   "hooks": {
-    "SessionStart": [
-      {
-        "matcher": "startup",
-        "hooks": [
-          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/scripts/session-setup.sh", "timeout": 120 }
-        ]
-      }
-    ],
     "PreToolUse": [
       {
-        "matcher": "mcp__Robinhood__place_equity_order",
+        "matcher": "mcp__.*Robinhood__place_equity_order",
         "hooks": [
-          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/hooks/mandate-order-guard.sh", "timeout": 10 }
+          { "type": "command", "command": "bash \"$HOME\"/.claude/hooks/mandate-order-guard.sh || { echo 'MANDATE BLOCK: the order guard failed to run (missing or crashed); failing closed.' >&2; exit 2; }", "timeout": 10 }
         ]
       }
     ]
   }
 }
 ```
+The matcher is a regex on purpose: the MCP server prefix differs between installs (`mcp__Robinhood__…` vs `mcp__claude_ai_Robinhood__…` for the claude.ai connector), and a literal matcher for the wrong prefix never fires. **Verified live 2026-10-19**: a prohibited `place_equity_order` (a `limit`) through the claude.ai connector was denied by the hook before reaching Robinhood.
 
-That block is `.claude/settings.json`, shipped with the desk rather than pasted
-into `~/.claude` by hand.
+**Keep the copies in sync.** A user-level copy is a fork. That is how a guard from 2026-08-26 — which still allowed limit orders, after-hours orders and quantity-sized market buys, and did not fail closed — stayed registered into October. `session-setup.sh` now compares `~/.claude/hooks/mandate-order-guard.sh` byte-for-byte with the skill's copy and refuses to verify when they differ; re-run the `install` line above after every guard change. If you use the skill uploaded to claude.ai, re-upload it after changes too: that synced copy does not update from this repo.
 
-| Order | Guard |
-|---|---|
-| `market` (+ `dollar_amount` or quantity), `market_hours=regular_hours` | ALLOW |
-| `market`, any other `market_hours` | DENY |
-| `limit` + `limit_price`, fractional or whole | ALLOW |
-| `limit` without `limit_price` | DENY |
-| `limit` + `dollar_amount` | DENY — the schema would flip it to `market` |
-| `stop_market` / `stop_limit`, any session | DENY |
-| any order with notional > $1,200 | DENY |
-| any order, when `jq` is not installed | DENY — the guard fails closed |
+**`session-setup.sh`** installs `jq` (root or passwordless `sudo`; never prompts), checks the user-level copy is in sync, and runs **15 probes against every guard copy** — 12 prohibited orders that must be denied and 3 permitted ones that must pass (a guard that denies everything is as broken as one that allows everything). It prints `order guard verified` and exits 0 only if every probe behaves; otherwise `ORDER GUARD NOT VERIFIED` and exit 1. A `SessionStart` hook cannot block the session — its output lands in the session context, and `SKILL.md` forbids executing orders unless that line says verified. In skill mode `SKILL.md` runs it by hand.
 
-**The guard depends on `jq` and fails closed without it.** Every rule above is
-implemented with `jq`; without it each field parse returns empty, `deny()` cannot
-emit its JSON either, and the script exits 0 with no output — which the hook
-runner reads as ALLOW. A guard that silently permits everything when a dependency
-is missing is worse than no guard, so it now denies up front instead. Verified
-2026-08-26 against a `PATH` with no `jq`: the previous revision let a
-`stop_market` through with empty output and `rc=0`. `scripts/session-setup.sh`
-installs `jq` on every boot — on a scheduled-run container it is not there by
-default.
-
-**Where to install it so it survives.** The scheduled-run container is ephemeral — a hook written inside a session is gone by the next one.
-
-**This desk now carries its own wiring.** `.claude/settings.json` is
-version-controlled alongside the guard and points both hooks at paths inside the
-desk via `$CLAUDE_PROJECT_DIR`, so nothing has to be copied into `~/.claude` and
-nothing is lost when a container reboots:
-
-*   `PreToolUse` → `hooks/mandate-order-guard.sh` (the order guard itself).
-*   `SessionStart` → `scripts/session-setup.sh`, which installs `jq`, marks the
-    guard executable, and **smoke-tests it** by feeding it a `stop_market` probe.
-    If the guard does not deny that probe, the setup script exits non-zero and
-    the session refuses to start. A guard that answers "allow" to a prohibited
-    order is not installed, it is decorative — better to block the session than
-    to trade behind a guard that is not evaluating anything.
-
-*   **Run from a checkout of this repo**: nothing to do beyond having it open as
-    the project directory.
-*   **Cloud runs** (claude.ai/code): the environment's **network access must be
-    `Trusted`** or higher, or `apt-get` cannot reach the Ubuntu archives and
-    `session-setup.sh` aborts by design. Trusted is the default.
-*   **Installed as a skill** (`~/.claude/skills/agentic-trading-desk/`): a skill
-    directory is **not** a project directory, so `.claude/settings.json` inside
-    it is never read and neither hook loads on its own. The files travel with
-    the skill so the wiring is one copy away, but in that mode the enforcement
-    that actually runs is the session-start check in `SKILL.md`, which invokes
-    `scripts/session-setup.sh` and refuses to execute orders if the probe is not
-    denied. To get the real harness-level guard, point a project's
-    `.claude/settings.json` at these two scripts.
-*   **Caveat worth checking**: hooks only load for sessions whose project
-    directory is the one holding that `settings.json`. If a scheduled run
-    executes against a different repo, these hooks never load and the desk runs
-    unguarded — confirm which repository the scheduled session opens.
-
-See https://code.claude.com/docs/en/claude-code-on-the-web
-
-Without one of those, only the SKILL.md rule applies — which is what already proved insufficient.
+*   **Cloud runs** (claude.ai/code): the environment's **network access must be `Trusted`** or higher, or `apt-get` cannot reach the Ubuntu archives and `session-setup.sh` fails by design. Hooks load only for the repository the session opens — confirm a scheduled run opens this one. See https://code.claude.com/docs/en/claude-code-on-the-web

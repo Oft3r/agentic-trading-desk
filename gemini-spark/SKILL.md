@@ -33,24 +33,24 @@ The system operates strictly within these boundaries. A limit exceeded is a dire
 - **TACTICAL REBOUND goes in at half size** — it is counter-trend by definition.
 
 **Hard limits**
-- Max **$1,200** per order.
+- **Position size:** base size = **3% of account value**, and never more than **$1,200** per buy order. TACTICAL REBOUND = half of base size. Sells are not notional-capped: Robinhood offers no short selling, so a sell is bounded by the shares held.
 - Max **3 new positions** per session. Exits are uncapped.
 - Minimum **15% of account value held in cash**. I never touch that reserve.
-- **Order types: `limit` and `market` are both supported**:
-  - *Passive limit*: `limit_price` strictly inside the spread, within 0.3% of the last trade. Best price, may not fill.
-  - *Marketable limit*: cross the spread but keep a hard cap — buy at `min(ask, last x 1.003)`, sell at `max(bid, last x 0.997)`. Fills like a market order in regular hours while bounding the worst case.
-  - *Market*: fills at prevailing book price. **Regular hours only** — the Robinhood MCP rejects `market` in extended hours. Outside regular hours, use a limit order or wait for the next session.
-  - In every run summary, state the order type chosen and the explicit rationale.
-- **Quote staleness:** Before pricing any order, check `venue_bid_time` / `venue_ask_time` against current time and confirm a recent trade print. If top of book has not updated in **over 2 minutes** during regular hours, or there is no post-close print when the session is closed, the quote is stale: do NOT price against it and do not trade the name.
+- **Orders only during regular hours — Mon–Fri 09:30–15:58 ET.** Outside that window, place no orders at all; carry any action to the next regular session and re-run the analysis then. Robinhood accepts fractional and dollar-based orders only in `regular_hours` (a fractional limit with `market_hours=extended_hours` is rejected; without `market_hours` it queues for the next open), and base size is below one share of most names.
+- **Order shape:** `type: "market"` only (no `limit`, `stop_market` or `stop_limit`; stops are manual levels re-checked each session) · `market_hours` omitted or `regular_hours` · buys sized in `dollar_amount`, sells may use `quantity` · `time_in_force` explicitly `gfd`.
+  - In every run summary, state the order placed and the explicit rationale.
+- **Quote staleness:** Before any order, check `venue_bid_time` / `venue_ask_time` and `venue_last_trade_time` against the current time. If top of book or the last trade is **more than 2 minutes** old, the quote is stale: do not trade the name this session.
 - **Order preflight:** Before every `place_equity_order`, check each of these fields:
-  - `type`: `limit` or `market` only.
-  - `session`: `market`, fractional, and `dollar_amount` all require regular hours.
+  - `ET clock`: inside Mon–Fri 09:30–15:58 (otherwise: no order).
+  - `side`: `buy` or `sell`.
+  - `type`: `market`.
+  - `market_hours`: omitted or `regular_hours`.
   - `quote age`: top of book updated < 2 min ago; recent trade exists.
-  - `limit_price`: limit orders only: within 0.3% of last trade.
-  - `size`: `quantity` or `dollar_amount` (exactly one).
-  - `notional`: ≤ $1,200.
+  - `size`: exactly one · buys `dollar_amount` · sells `dollar_amount` or `quantity`.
+  - `time_in_force`: explicitly `gfd`.
+  - `notional` (buys): `dollar_amount` ≤ 3% of account value and ≤ $1,200.
 - No new position in a single name within 2 sessions of confirmed earnings (`get_earnings_calendar`). ETFs exempt.
-- Run `review_equity_order` before every `place_equity_order`. If the simulation differs by more than 1% in price or quantity from computed targets, **abort and report**.
+- Run `review_equity_order` with the exact parameters before every `place_equity_order`. **Abort and report** if `order_checks` is non-empty (surface the alert verbatim), or if `quote_data.last_trade_price` is more than 1% away from the price the analysis used. A dollar-sized market order's review returns no share quantity or fill price — the quote is what to check. If the review returns `customer_approval_required: true`, the order goes to the user for approval in the Robinhood app: report it as *pending approval*, not as executed.
 
 **Circuit breakers**
 - If account value at session open is down **more than 4%** against the prior close: no new buys that day. Exits remain allowed.
@@ -62,17 +62,19 @@ The system operates strictly within these boundaries. A limit exceeded is a dire
 - Averaging down.
 - Options, crypto, margin, and short selling.
 
+**No external guard runs in this version.** The preflight list above is the entire safety margin: check it field by field before every order and abort on any failing field. The only broker-side control is Robinhood's trade-approval setting (`get_trade_approval_setting` → `human_must_approve_trades`), which only the user can change in the app.
+
 ## Robinhood MCP Recipe (Order of Calls)
 
-Load the tools with `tool_search` before using them.
+Discover and load the Robinhood MCP tools before using them.
 
 **Session self-audit (first call of every run):**
-`get_equity_orders` on the agent-tradable account with `placed_agent="agentic"` since the previous session. Check `type`, `time_in_force`, and notional on every order returned, and surface any discrepancy in the summary report.
+`get_equity_orders` on the agent-tradable account with `agent_initiated=true` since the previous session (this also catches agent orders the user approved in the app). Check `side`, `type`, `market_hours`, creation time, `time_in_force`, and notional on every order returned — any non-`market` order, any order outside `regular_hours` or created outside Mon–Fri 09:30–15:58 ET, a non-`gfd` order, a buy without `dollar_based_amount`, or a buy over $1,200 is a discrepancy — and surface any discrepancy in the summary report.
 
 **To analyze a ticker:**
 1. `Robinhood:get_equity_historicals` → ~290 daily bars (closes). Request a range yielding ≥220 bars (ideal for EMA200).
 2. `Robinhood:get_equity_quotes` → live price / last session close.
-3. If holding a position: `Robinhood:get_equity_positions` for size and P&L → set `holding: true` in scoring.
+3. `Robinhood:get_equity_positions` (agent-tradable account) for size and P&L → `--holding true` if there is a position, `--holding false` if flat. The decision cascade differs between the two.
 
 **For the Macro-Sentiment pillar (once per session, shared):**
 1. `get_equity_historicals` for the 8 ETFs: SPY, RSP, IWM, HYG, LQD, TLT, XLY, XLP.
@@ -85,22 +87,24 @@ Load the tools with `tool_search` before using them.
 
 ## Computation Flow (Run via Code Execution)
 
-Scripts are pure Python stdlib; they do not require external network access. They live in `scripts/` inside this skill's directory.
+Scripts are pure Python stdlib (3.9+); they do not require external network access or tzdata. They live in `scripts/` inside this skill's directory. Run any script with no arguments to execute its self-test; a non-zero exit means do not trust its numbers this session.
 
-**Step 0 — append today's close if needed:**
-If daily historical bars do not include the current session, append `last_trade_price` from `get_equity_quotes` as today's close before scoring.
+**Step 0 — prepare inputs (every session):**
+Save the historicals and quotes responses to files, then:
+```bash
+python3 scripts/prepare_inputs.py --historicals <files…> --quotes <files…> --out <workdir>
+```
+It drops bars flagged `interpolated: true` (synthetic fill, e.g. the span before a recent IPO), appends today's `last_trade_price` from the broker's own dates (provisional during regular hours — label the scorecard `intraday (partial bar)` — final after 16:00 ET), excludes stale symbols, and writes `ticker_<SYM>.json`, `macro_input.json` and a report in `closes.json`. Report its warnings.
 
 **Step 1 — Macro (once per session):**
-Assemble JSON with closes of the 8 ETFs + `yield_spread` (optional):
 ```bash
-python3 scripts/macro_pillar.py macro_input.json --json
+python3 scripts/macro_pillar.py <workdir>/macro_input.json --json
 ```
-Save `pillar_score` (-2..+2). That number is the Macro-Sentiment score for all tickers today.
+To add the yield spread, insert `"yield_spread"` into `macro_input.json` first. Save `pillar_score` (-2..+2). That number is the Macro-Sentiment score for all tickers today.
 
 **Step 2 — Per ticker:**
-Assemble `{symbol, close:[...], macro_score, holding}`:
 ```bash
-python3 scripts/score.py ticker_input.json
+python3 scripts/score.py <workdir>/ticker_<SYM>.json --macro-score <pillar_score> --holding <true|false>
 ```
 This returns the three-pillar scorecard and decision.
 

@@ -86,7 +86,7 @@ class Component:
     available: bool = True
 
 
-def trend_signal(series: list[float], fast: int, slow: int, slope_win: int) -> tuple[Optional[float], str]:
+def trend_signal(series: list[float], slow: int, slope_win: int) -> tuple[Optional[float], str]:
     """
     Directional signal -1/0/+1 based on:
       base  = position of the last value vs its slow SMA
@@ -135,7 +135,7 @@ BASE_WEIGHTS = {
 }
 
 
-def score_macro(data: dict, fast: int = 50, slow: int = 200,
+def score_macro(data: dict, slow: int = 200,
                 slope_win: int = 20, corr_win: int = 40) -> MacroResult:
     series = data.get("series", {})
     notes: list[str] = []
@@ -155,7 +155,7 @@ def score_macro(data: dict, fast: int = 50, slow: int = 200,
     rsp, spy = closes("RSP"), closes("SPY")
     c = Component("Concentration (equal vs cap-weight)", "RSP/SPY", BASE_WEIGHTS["concentration"][1])
     if rsp and spy:
-        c.signal, c.detail = trend_signal(ratio_series(rsp, spy), fast, slow, slope_win)
+        c.signal, c.detail = trend_signal(ratio_series(rsp, spy), slow, slope_win)
     if c.signal is None:
         c.available = False
     comps["concentration"] = c
@@ -190,7 +190,7 @@ def score_macro(data: dict, fast: int = 50, slow: int = 200,
     hyg, lqd = closes("HYG"), closes("LQD")
     c = Component("Credit (high-yield vs IG)", "HYG/LQD", BASE_WEIGHTS["credit"][1])
     if hyg and lqd:
-        c.signal, c.detail = trend_signal(ratio_series(hyg, lqd), fast, slow, slope_win)
+        c.signal, c.detail = trend_signal(ratio_series(hyg, lqd), slow, slope_win)
     if c.signal is None:
         c.available = False
     comps["credit"] = c
@@ -199,7 +199,7 @@ def score_macro(data: dict, fast: int = 50, slow: int = 200,
     iwm = closes("IWM")
     c = Component("Size factor (small vs large)", "IWM/SPY", BASE_WEIGHTS["size"][1])
     if iwm and spy:
-        c.signal, c.detail = trend_signal(ratio_series(iwm, spy), fast, slow, slope_win)
+        c.signal, c.detail = trend_signal(ratio_series(iwm, spy), slow, slope_win)
     if c.signal is None:
         c.available = False
     comps["size"] = c
@@ -208,7 +208,7 @@ def score_macro(data: dict, fast: int = 50, slow: int = 200,
     tlt = closes("TLT")
     c = Component("Equity vs Bond (SPY/TLT)", "SPY/TLT", BASE_WEIGHTS["equity_bond"][1])
     if spy and tlt:
-        c.signal, c.detail = trend_signal(ratio_series(spy, tlt), fast, slow, slope_win)
+        c.signal, c.detail = trend_signal(ratio_series(spy, tlt), slow, slope_win)
     if c.signal is None:
         c.available = False
     comps["equity_bond"] = c
@@ -217,7 +217,7 @@ def score_macro(data: dict, fast: int = 50, slow: int = 200,
     xly, xlp = closes("XLY"), closes("XLP")
     c = Component("Sector rotation (cyclical vs defensive)", "XLY/XLP", BASE_WEIGHTS["sector"][1])
     if xly and xlp:
-        c.signal, c.detail = trend_signal(ratio_series(xly, xlp), fast, slow, slope_win)
+        c.signal, c.detail = trend_signal(ratio_series(xly, xlp), slow, slope_win)
     if c.signal is None:
         c.available = False
     comps["sector"] = c
@@ -326,7 +326,6 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Macro-Sentiment pillar scorer (cross-asset, Robinhood-compatible).")
     ap.add_argument("input", nargs="?", help="JSON with close price series. If omitted, runs a synthetic self-test.")
     ap.add_argument("--json", action="store_true", help="Output in JSON format instead of human-readable report.")
-    ap.add_argument("--fast", type=int, default=50)
     ap.add_argument("--slow", type=int, default=200)
     ap.add_argument("--slope-win", type=int, default=20)
     ap.add_argument("--corr-win", type=int, default=40)
@@ -339,7 +338,7 @@ def main() -> int:
         data = _synthetic()
         print("[self-test with synthetic data — no input file]\n", file=sys.stderr)
 
-    r = score_macro(data, fast=args.fast, slow=args.slow,
+    r = score_macro(data, slow=args.slow,
                     slope_win=args.slope_win, corr_win=args.corr_win)
     print(json.dumps(asdict(r), indent=2, ensure_ascii=False) if args.json else render(r))
     return 0

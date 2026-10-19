@@ -47,6 +47,11 @@ def score_trend(ind: dict) -> tuple[int, str]:
     if s200 is not None:
         if s200 > 0: pts += 1; bits.append("EMA200↑")
         else: pts -= 1; bits.append("EMA200↓")
+    n_used = (e20 is not None) + (e20 is not None and e50 is not None) \
+        + (e50 is not None and e200 is not None) + (s200 is not None)
+    if n_used < 4:
+        # Same thresholds on fewer components shift the scale: make it visible.
+        bits.append(f"partial: {n_used}/4 components (need more bars)")
     score = 2 if pts >= 3 else 1 if pts >= 1 else 0 if pts == 0 else -1 if pts >= -2 else -2
     return score, ", ".join(bits)
 
@@ -116,8 +121,11 @@ def _flags(ind: dict) -> dict:
     # --- Rebound / reversal (for re-entry) ---
     if rsi is not None and rsi_p is not None and rsi_p < 35 and rsi > rsi_p:
         rebound.append(f"RSI turning from oversold ({rsi_p:.0f}→{rsi:.0f})")
-    if hist is not None and hist_p is not None and hist > hist_p and hist_p < 0:
-        rebound.append("MACD histogram crossing bullishly")
+    # A real zero cross, not just any uptick of a negative histogram: an uptick
+    # moves with the same single green bar as the RSI turn, so counting both
+    # would let one up-day satisfy the two-signal re-entry threshold.
+    if hist is not None and hist_p is not None and hist > 0 and hist_p <= 0:
+        rebound.append("MACD histogram crossing above zero")
     # Genuine recovery of EMA20: currently above EMA20, but closed below it within last 5 bars.
     # Without a recent dip, it is a normal uptrend, not a rebound.
     bsb = ind.get("bars_since_below_ema20")
@@ -171,7 +179,8 @@ def decide(ind: dict, trend: int, mom: int, macro: Optional[int],
         action = "RE-ENTRY (new cycle)"
         rationale = "Rebound/reversal with healthy EMA structure: likely start of a new bullish cycle."
         framing = ("Valid entry trigger. Confirm with candle/volume before entering "
-                   "full size; stop below the rebound pivot.")
+                   "full size; manual stop level below the rebound pivot, re-checked "
+                   "each session (no resting stop orders).")
     elif not in_pos and n_reb >= 2 and dc:
         action = "TACTICAL REBOUND (counter-trend)"
         rationale = "Rebound signals within a death-cross: tactical trade, NOT a new cycle."
@@ -234,9 +243,45 @@ def decide(ind: dict, trend: int, mom: int, macro: Optional[int],
 # Full Scorecard Card
 # --------------------------------------------------------------------------
 
+def _parse_holding(v) -> Optional[bool]:
+    """Accepts bool/None, 0/1, or 'true'/'false'/'yes'/'no' strings. A string like
+    "true" must not silently read as flat (the cascade differs by holding)."""
+    if v is None or isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)) and v in (0, 1):
+        return bool(v)
+    if isinstance(v, str):
+        t = v.strip().lower()
+        if t in ("true", "yes", "1"):
+            return True
+        if t in ("false", "no", "0"):
+            return False
+        if t in ("", "null", "none"):
+            return None
+    raise ValueError(f"holding must be true/false/null, got {v!r}")
+
+
+def _parse_macro(v) -> Optional[int]:
+    """macro_score is pillar_score from macro_pillar.py: an integer -2..+2.
+    Accepts integral floats/strings (1.0, "1"); rejects anything else."""
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        raise ValueError(f"macro_score must be an integer -2..+2, got {v!r}")
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        raise ValueError(f"macro_score must be an integer -2..+2, got {v!r}") from None
+    if not f.is_integer() or not -2 <= f <= 2:
+        raise ValueError(f"macro_score must be an integer -2..+2 (pillar_score), got {v!r}")
+    return int(f)
+
+
 def score_symbol(close: list[float], macro_score: Optional[int] = None,
                  symbol: Optional[str] = None, holding: Optional[bool] = None,
                  slope_lookback: int = 5) -> dict:
+    macro_score = _parse_macro(macro_score)
+    holding = _parse_holding(holding)
     ind = I.compute(close, slope_lookback)
     t, t_detail = score_trend(ind)
     m, m_detail = score_momentum(ind)
@@ -294,27 +339,71 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Three pillars scoring + exit/re-entry decision.")
     ap.add_argument("input", nargs="?", help="JSON: {symbol, close:[...], macro_score?, holding?}. Without file: self-test.")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--macro-score", help="Overrides macro_score in the input (pillar_score from macro_pillar.py).")
+    ap.add_argument("--holding", help="Overrides holding in the input: true / false.")
     args = ap.parse_args()
 
     if args.input:
         with open(args.input) as f:
             raw = json.load(f)
-        card = score_symbol(
-            [float(x) for x in raw["close"]],
-            macro_score=raw.get("macro_score"),
-            symbol=raw.get("symbol"),
-            holding=raw.get("holding"),
-        )
+        try:
+            card = score_symbol(
+                [float(x) for x in raw["close"]],
+                macro_score=args.macro_score if args.macro_score is not None else raw.get("macro_score"),
+                symbol=raw.get("symbol"),
+                holding=args.holding if args.holding is not None else raw.get("holding"),
+            )
+        except ValueError as e:
+            print(f"input error: {e}", file=sys.stderr)
+            return 2
     else:
-        import math
-        # bullish series stretching toward a ceiling (should trigger exhaustion)
-        close = [round(100 + i * 0.25 + 6 * math.sin(i / 12), 2) for i in range(260)]
-        close += [close[-1] * 1.05, close[-1] * 1.10]  # final spike
-        card = score_symbol(close, macro_score=1, symbol="SELFTEST", holding=True)
         print("[synthetic self-test]\n", file=sys.stderr)
+        failures = _self_test()
+        if failures:
+            for msg in failures:
+                print(f"SELF-TEST FAIL: {msg}", file=sys.stderr)
+            return 1
+        print("self-test OK", file=sys.stderr)
+        return 0
 
     print(json.dumps(card, indent=2, ensure_ascii=False) if args.json else render(card))
     return 0
+
+
+def _self_test() -> list[str]:
+    """Synthetic scenarios with an asserted decision; prints each card."""
+    import math
+    base = [round(100 + i * 0.25 + 6 * math.sin(i / 12), 2) for i in range(260)]
+    # Holder: five +2% days into the upper band, then a -1.5% day -> exhaustion.
+    rally = base + [base[-1] * (1 + 0.02 * j) for j in range(1, 6)]
+    rally.append(rally[-1] * 0.985)
+    # Flat: steady downtrend in a death-cross -> stay out.
+    down = [round(200 - i * 0.4 + 4 * math.sin(i / 7), 2) for i in range(260)]
+    cases = [
+        ("EXHAUSTION", rally, True, 1, "EXIT / TRIM"),
+        ("DOWNTREND", down, False, -1, "STAY OUT / AVOID"),
+    ]
+    failures = []
+    for name, close, holding, macro, expected in cases:
+        card = score_symbol(close, macro_score=macro, symbol=name, holding=holding)
+        print(render(card) + "\n")
+        got = card["decision"]["action"]
+        if got != expected:
+            failures.append(f"{name}: expected {expected!r}, got {got!r}")
+    for bad in ("maybe", 2):
+        try:
+            _parse_holding(bad)
+            failures.append(f"_parse_holding accepted {bad!r}")
+        except ValueError:
+            pass
+    if _parse_holding("true") is not True or _parse_macro(1.0) != 1:
+        failures.append("input normalization broken")
+    try:
+        _parse_macro(0.5)
+        failures.append("_parse_macro accepted 0.5")
+    except ValueError:
+        pass
+    return failures
 
 
 if __name__ == "__main__":
